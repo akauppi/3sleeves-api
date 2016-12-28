@@ -2,6 +2,21 @@
 
 - `design/`: describing the intended API (Websocket)
 
+- `README` needs some pictures to make the page lighter to read
+ 
+- mention in `README` what we expect of the implementations:
+
+||persistent|replicated| 
+|---|---|---|
+|Kafka|Y|Y|
+|DistributedLog|Y|Y|
+|MongoDB|Y|Y|
+
+Data content is opaque to us, but e.g. Three Sleeves Configuration API will use HOCON.
+
+
+---
+ 
 - Akka Streams interface
 
 - plain in-memory implementation (Akka Streams)
