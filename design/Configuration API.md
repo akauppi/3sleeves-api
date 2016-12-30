@@ -70,8 +70,10 @@ The application only needs to parse values one by one. The right side of the col
 
 One can easily split such a stream by the key, and provide to each application entry that needs to react on the changed config just the stream of events that matter to it. Voíla!
 
+Note that if the configuration setup is regarded sacred (so that not even the original author should change it), its stream can be sealed. The parts that are included can still be changed, but the structure and maybe some initial values are fixed. How much this is needed in practise remains to be seen, since it's about dynamic configuration, after all, but it's good to see the basic structures of Streams API being useful here.
 
-## Endpoint
+
+## Endpoints
 
 ```
 wss://host:port/.conf/?from=/path[/...]/log[,...]
@@ -80,6 +82,47 @@ wss://host:port/.conf/?from=/path[/...]/log[,...]
 The Configuration API can be presented by a single endpoint that works as a proxy to one or more HOCON streams. These streams can use `include` to outsource parts of the overall configuration to other people, probably with different (lesser) scopes than the master configuration.
 
 The output of the endpoint, as discussed above, is line-wise HOCON configuration strings.
+
+Multiple configuration strings must be deliverable as a single batch (details on how to do this are still open), since configuration entries may have interdependencies (think of e.g. changing a host and port separately - we don't want the application to have a state where it's using the old host but with new port).
+
+In the beginning of consumption, the *whole* existing state shall be provided to the client *compacted*, i.e. only the currently applicable values listed, and each of them only once. This shall be done as a single batch. From there on, changes come in further batches.
+
+If all the streams contributing to the configuration have been sealed, also the config Websocket connection will close (since there will be no more new values). In practise, this is likely not the case since the point is in the values changing, but we should test for those cases, nonetheless.
+
+### No need for an 'at' parameter?
+
+While the source streams used for a configuration can be rewound from any offset (they are expected not to be head-chopped (*)), rewinding a configuration stream is not supported. You would need to provide offsets of all the involved streams, in order to do that.
+
+If we ever support `since` rewinding in normal streams, that can be supported also by configuration streams, to get back to historic configurations at certain times.
+
+* (\*) There must be an English term for that? What's truncation that happens at the head, not the tail?
+
+
+## Format particulars
+
+- no environment variable expansion (behave the same as if those env.vars don't exist)
+- comments (`//` and `#`) stipped as in HOCON (in the incoming entries)
+- probably not going to allow newline (`\n`) so much in entries as HOCON does (use comma instead)
+
+In HOCON, 
+
+>If both values are objects, then the objects are merged.
+
+We should do the same, to provide least surprise for the users.
+
+We should be able to use the Typesafe Config machinery itself, in evaluating the configurations. This way, we don't have to duplicate their logic, and any corner cases would get processed the same way.
+
+
+## Use as access control for Streams API
+
+Let's take a practical example from assigning access rights to Streams API paths and logs.
+
+### master.conf
+
+```
+/**/: 
+```
+
 
 
 
@@ -124,3 +167,8 @@ products: [
 
 
 
+---
+
+## Extras
+
+- When opening 
