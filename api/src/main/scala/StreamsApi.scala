@@ -68,8 +68,6 @@ trait StreamsAPI {
   //    Failure(NotFound)
   //
   def seal( path: String )(implicit token: BearerToken): Try[Boolean]
-
-
 }
 
 object StreamsAPI {

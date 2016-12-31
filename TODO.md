@@ -1,16 +1,16 @@
 # Todo
 
-- `design/`: describing the intended API (Websocket)
-
 - `README` needs some pictures to make the page lighter to read
  
 - mention in `README` what we expect of the implementations:
 
-||persistent|replicated| 
-|---|---|---|
-|Kafka|Y|Y|
-|DistributedLog|Y|Y|
-|MongoDB|Y|Y|
+||persistent|resilient|replicated| 
+|---|---|---|---|
+|Kafka|Y|Y|Y|
+|DistributedLog|Y|Y|Y|
+|MongoDB|Y|Y|Y|
+|our mem-plain|N|N|N|
+|our node.js|Y|N?|N|
 
 Data content is opaque to us, but e.g. Three Sleeves Configuration API will use HOCON.
 
@@ -18,6 +18,7 @@ Data content is opaque to us, but e.g. Three Sleeves Configuration API will use 
 ---
  
 - Akka Streams interface
+  - started
 
 - plain in-memory implementation (Akka Streams)
 

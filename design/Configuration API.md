@@ -76,7 +76,7 @@ Note that if the configuration setup is regarded sacred (so that not even the or
 ## Endpoints
 
 ```
-wss://host:port/.conf/?from=/path[/...]/log[,...]
+wss://host:port/.conf/?from=/path[/...]/log
 ```
 
 The Configuration API can be presented by a single endpoint that works as a proxy to one or more HOCON streams. These streams can use `include` to outsource parts of the overall configuration to other people, probably with different (lesser) scopes than the master configuration.

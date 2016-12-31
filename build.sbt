@@ -53,3 +53,25 @@ lazy val api = project
       scalaTest
     )
   )
+
+lazy val `api-testkit` = project
+  .settings(
+    libraryDependencies ++= Seq(
+      akkaStream,
+      config,
+      //
+      scalaTest
+    )
+  )
+  .dependsOn(api)
+
+lazy val `impl-plain-mem` = project
+  .settings(
+    libraryDependencies ++= Seq(
+      akkaStream,
+      config,
+      //
+      scalaTest
+    )
+  )
+  .dependsOn(api)
