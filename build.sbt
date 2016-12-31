@@ -42,7 +42,7 @@ libraryDependencies ++= Seq(
 ***/
 
 lazy val `three-sleeves-api` = project.in(file("."))
-  .aggregate(api)
+  .aggregate(api, `api-testkit`, `impl-plain-mem`)
 
 lazy val api = project
   .settings(
@@ -74,4 +74,4 @@ lazy val `impl-plain-mem` = project
       scalaTest
     )
   )
-  .dependsOn(api)
+  .dependsOn(api, `api-testkit` % "compile->test")
