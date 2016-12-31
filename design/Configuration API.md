@@ -103,13 +103,20 @@ If we ever support `since` rewinding in normal streams, that can be supported al
 - no environment variable expansion (behave the same as if those env.vars don't exist)
 - comments (`//` and `#`) stipped as in HOCON (in the incoming entries)
 - probably not going to allow newline (`\n`) so much in entries as HOCON does (use comma instead)
+- like in HOCON, references in `include`d streams are done in two scopes:
 
-In HOCON, 
+> Substitutions in included files are looked up at two different paths; first, relative to the root of the included file; second, relative to the root of the including configuration.
 
->If both values are objects, then the objects are merged.
+This may be slightly unnecessary for us, but it's good to avoid surprises and follow the HOCON conventions as close as we can.
 
-We should do the same, to provide least surprise for the users.
+- unlike HOCON, we could provide an error if an included stream does not exist. This is likely a typo and good to detect fast (HOCON treats missing files as empty objects). This means we would not need the special `required` construct, either.
 
+- like HOCON, we would not allow an unquoted include parameter. That is because then we would introduce possibility to dynamically change the whole stream, where includes are read from. HOCON does not, currently, do this. If there is a compelling reason to do otherwise, technically that is doable.
+ 
+- as with HOCON, we can allow `include` params to be either relative (to the parent of the stream that was including them) or absolute. We naturally won't support classPath, or file includes, only streams.
+
+- `includes` are limited to the one server. No global `wss://` links, not URL reading. 
+ 
 We should be able to use the Typesafe Config machinery itself, in evaluating the configurations. This way, we don't have to duplicate their logic, and any corner cases would get processed the same way.
 
 

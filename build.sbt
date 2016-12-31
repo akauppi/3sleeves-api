@@ -21,34 +21,14 @@ scalacOptions in ThisBuild ++= Seq(
 //--- Dependencies ---
 
 val akkaVersion = "2.4.16"
-val akkaActor = "com.typesafe.akka" %% "akka-actor" % akkaVersion
+//val akkaActor = "com.typesafe.akka" %% "akka-actor" % akkaVersion
+val akkaStream = "com.typesafe.akka" %% "akka-stream" % akkaVersion
 
 val akkaHttpVersion = "10.0.0"
-val akkaHttp = "com.typesafe.akka" %% "akka-http" % akkaHttpVersion
-val akkaHttpTestkit = "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpVersion % Test
+//val akkaHttp = "com.typesafe.akka" %% "akka-http" % akkaHttpVersion
+//val akkaHttpTestkit = "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpVersion % Test
 
-/*** disabled
-// Note: DL is a Java library but exported with reference to Scala version (2.10 or 2.11) since it uses those
-//    as internal dependencies.
-//
-val dlVersion = "0.4.0-incubating-SNAPSHOT"
-val distributedLog = Seq(
-  "com.twitter" %% "distributedlog-core" % dlVersion,
-  "com.twitter" %% "distributedlog-client" % dlVersion,
-  "com.twitter" %% "distributedlog-messaging" % dlVersion,
-  "com.twitter" %% "distributedlog-protocol" % dlVersion
-)
-
-// So it finds DistributedLog artefacts
-//
-resolvers += Resolver.mavenLocal
-
-// 'mvn install' did not provide .jar for this:
-//
-// See -> https://issues.apache.org/jira/browse/DL-148
-//
-libraryDependencies += "com.twitter.common" % "net-util" % "0.0.102"
-***/
+val config = "com.typesafe" % "config" % "1.3.1"
 
 val scalaTest = "org.scalatest" %% "scalatest" % "3.0.1" % Test
 
@@ -61,13 +41,15 @@ libraryDependencies ++= Seq(
 )
 ***/
 
-lazy val `three-sleeves-api` = project
+lazy val `three-sleeves-api` = project.in(file("."))
+  .aggregate(api)
+
+lazy val api = project
   .settings(
     libraryDependencies ++= Seq(
-      akkaHttp,
+      akkaStream,
+      config,
       //
-      akkaHttpTestkit,
-      scalaTest,
-      dockerItScala
-    ) //++ distributedLog
+      scalaTest
+    )
   )

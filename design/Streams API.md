@@ -77,7 +77,7 @@ PATCH /path[/...]/log
 -->
 
 ```
-wss://host:port/path[/...]/log?write
+wss://host:port/path[/...]/log?write[&autoCreate]
 ```
 
 - author is provided by authentication scope `uid`
@@ -101,6 +101,7 @@ Possible responses:
 
 - Websocket gets created
 - `401` UNAUTHORIZED: not allowed
+- `404` NOT FOUND: no such stream (and `autoCreate` was not given) (would have had access)
 
 
 ### Reading a log
@@ -132,6 +133,7 @@ Possible responses:
 
 - Websocket gets created
 - `401` UNAUTHORIZED: not allowed
+- `404` NOT FOUND: no such stream (would have had access)
 
 For errors, Problem JSON error object is provided in the body.
 
@@ -165,9 +167,10 @@ For a path, one gets:
 - sub-paths
 - who created the path
 - creation time
+- who sealed and when (if sealed)
 - overall retention quota (if any)
 
-Note: For metadata, we can easily use a stream for that, e.g. ".info" to tell who to contact etc. about the logs in the path. Such things don't need to be formulated by the Streams API, at all.
+Note: For application level metadata, we can easily use a normal stream for that, e.g. ".info" to tell who to contact etc. about the logs in the path. Such things don't need to be formulated within the Streams API.
 
 Access requirements:
 
@@ -176,10 +179,8 @@ Access requirements:
 Possible responses:
 
 - `200` OK: existed, data provided
-- `404` NOT FOUND: no such path or log
 - `401` UNAUTHORIZED: not allowed
-
-"Not allowed" has precedence over "not found": if a client is not allowed to query for a status, it's not even provided info on whether the target exists or not.
+- `404` NOT FOUND: no such path or log (but would have been authorized)
 
 
 ### Watching a path
@@ -188,17 +189,20 @@ Possible responses:
 wss://host:port/path[/...]/[&at=<offset>|0][&filter=logs|paths]
 ```
 
-The stream will carry information about the logs created under this path.
+The stream will carry information about the logs and sub-paths created under this path (not recursively).
 
 The `at` parameter (similar to the one used in Status `GET`) allows to "rewind" the creation "stream": 0 lists all the logs from the oldest to the most recent (and continues streaming newcomers). The order is always the same, and the logs never get deleted (part of our design criteria; we need to think what to do if someone deletes them on the implementation side).
 
 Without such a parameter one could get a directory listing, or otherwise "know" that there are 11 logs. Then, listening "from now on" could miss logs created between those two instances (listing and subscribing). By using `at=11` the client can be assured that it gets all announcements.
 
+---
+Note: A third way would be to *always* rewind from the beginning, i.e. always list all the entries. This might be the simplest way for implementing, and there's no real down side to it, except that applications only interested in new entries would need to skip the initial batch (we can provide it in one batch, and provide an empty batch if the directory is currently empty, so all they need to do is skip the first batch).
+
 The information per log entry / sub-path can be:
 
 - name
-- creation: time and uid
-- sealing: time and uid (if sealed)
+
+If the client wants more info, they should use the `status` call.
 
 Access requirements:
 
@@ -219,10 +223,10 @@ Sealing a log means no more writes are allowed to it. Possible readers of the lo
 
 Sealing a path means no new logs (or sub-paths) are allowed to be created within it. Possible watchers of the path (the websocket connections) are closed.
 
-Note: Sealing is very close to "closing" - both words can be used interchangeably.
+Note: Sealing is analogous to closing a file without being able to re-open it for writing.
 
 ```
-PUT /path[/...]/[log][&seal]
+PUT /path[/...]/[log]&seal
 ```
 
 Note: The `PUT` makes sense because it is idempotent. A log or a path can be sealed multiple times, and the result is the same. `PATCH`, another method that could be used, is not idempotent by HTTP definitions.
@@ -234,8 +238,8 @@ Access requirements:
 Possible responses:
 
 - `200` OK: sealed (or was already sealed)
-- `404` NOT FOUND: no such path
 - `401` UNAUTHORIZED: not allowed
+- `404` NOT FOUND: no such path (but would have been authorized)
 
 Again, `401` precedes over `404` (see above).
 
