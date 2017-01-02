@@ -33,3 +33,11 @@ Data content is opaque to us, but e.g. Three Sleeves Configuration API will use 
 - Kafka, DistributedLog and MongoDB implementations...
 
 Note: The main focus of Asko (the original author) is to work on the interface. If you are more interested in the implementation, please say so and take lead on those.
+
+## Open issues
+
+Write may fail - how to communicate that over Websockets?
+
+- it will fail if the storage space quota is exceeded. If we simply ignore this (and e.g. not have quotas) there won't be a problem. But quotas would be nice to allow multiple teams use a system, independently, within the agreed bounds.
+
+- Any such quota system is likely to arise from the implementation: if the implementation supports quotas, we should be compatible with them. We cannot enforce quotas since we are not in charge of the retention, that may be used to free up space.

@@ -168,7 +168,7 @@ For a path, one gets:
 - who created the path
 - creation time
 - who sealed and when (if sealed)
-- overall retention quota (if any)
+- overall quota (if any); how much is used of it
 
 Note: For application level metadata, we can easily use a normal stream for that, e.g. ".info" to tell who to contact etc. about the logs in the path. Such things don't need to be formulated within the Streams API.
 

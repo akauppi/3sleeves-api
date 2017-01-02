@@ -1,8 +1,6 @@
 package threeSleeves
 
-import java.time.{Instant, Period}
-
-import akka.stream.scaladsl.{Flow, Source}
+import akka.stream.scaladsl.{Source}
 import com.typesafe.config.{Config, ConfigValue}
 import threeSleeves.StreamsAPI.BearerToken
 
