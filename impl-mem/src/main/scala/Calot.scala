@@ -3,28 +3,36 @@ package impl.calot
 import java.time.Instant
 
 import akka.stream.scaladsl.{Flow, Sink, Source}
+import impl.calot.tools.RelPath
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI._
 
+import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 
+/*
+* Implementation that is all-memory, no persistence. There's no use for such except for as "customer 0" for 3Sleeves API.
+*/
 object Calot extends StreamsAPI {
 
+  private
+  val root = PathNode.root
+
+  // tbd. What is this supposed to do?
+  //
   override
-  def create( path: String )/*(implicit uid: UID)*/: Try[Boolean] = {
-    //checkAccess(uid, Access.Create)
+  def create( path: String, uid: UID ): Future[Try[Boolean]] = {
 
-    val (node: PATHNode, ret: Boolean) = PATHNode(path)
+    // tbd. Need a parameter to know if we're creating a key or keyless log. Maybe logs should be created outside
+    //    of Three Sleeves API.
+    //
+    var created: Boolean = false
 
-    if (path.endsWith("/")) {
-      Success(ret)
-    } else {
-      val (node: LogNode, ret: Boolean) = PATHNode.create(path)
+    def create(): AnyNode = ???
 
-      val (node: PATHNode, createdJustNow: Boolean) = PATHNode(path)
+    val fut: Future[Try[AnyNode]] = root.find( RelPath(path), Some(create) )
 
-
-    }
+    fut.map( x => x.map(_ => created) )
   }
 
   override

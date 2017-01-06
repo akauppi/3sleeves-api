@@ -1,17 +1,16 @@
 package impl.calot
 
 import impl.calot.tools.RelPath
-
 import java.time.Instant
 
-import akka.{NotUsed}
-import akka.actor.{Actor}
+import akka.NotUsed
+import akka.actor.Actor
 import akka.stream.{OverflowStrategy, QueueOfferResult}
 import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, RunnableGraph, Sink, Source, SourceQueueWithComplete}
+import impl.calot.AnyNode.AnyNodeActor
 import threeSleeves.StreamsAPI.UID
 
 import scala.util.Failure
-
 import scala.concurrent.Future
 
 /*
@@ -36,14 +35,8 @@ object LogNode {
   *     -> http://doc.akka.io/docs/akka/2.4.16/scala/stream/stream-dynamic.html#Dynamic_fan-in_and_fan-out_with_MergeHub_and_BroadcastHub
   */
   private
-  abstract class LogNodeActor[Rec <: LogNodeActor.Record](creator: UID) extends Actor {
+  abstract class LogNodeActor[Rec <: LogNodeActor.Record](creator: UID) extends AnyNodeActor(creator) {
     import LogNodeActor._
-
-    private
-    val created: Tamponné = Tamponné(creator,Instant.now())
-
-    private
-    var `sealed`: Option[Tamponné] = None
 
     // entries that a new consumer will get, before informed of later values
     //
@@ -117,17 +110,13 @@ object LogNode {
       src
     }
 
-    private
-    def seal(uid: UID): Unit = {
+    protected
+    def onSeal: Unit = {
 
-      if (`sealed`.isEmpty) {   // ignore multiple seals
-        `sealed` = Some(Tamponné(uid,Instant.now()))
+      // tbd. We should abort/cancel any write streams, or at least make sure if they write after a seal, those writes
+      //    will fail (not crucial for our experimental / development part).
 
-        // tbd. We should abort/cancel any write streams, or at least make sure if they write after a seal, those writes
-        //    will fail (not crucial for our experimental / development part).
-
-        complete()   // no more values coming from there
-      }
+      complete()   // no more values coming from there
     }
 
     def receive = {
@@ -177,12 +166,12 @@ object LogNode {
     case class Status(
                        oldestPos: ReadPos,   // == 'nextPos' if log is empty
                        nextPos: ReadPos,     // smallest unused position
-                       created: Tamponné,
-                       `sealed`: Option[Tamponné]
+                       created: Stamp,
+                       `sealed`: Option[Stamp]
                      )
 
     // https://youtu.be/-JqL2WIkaB4 :)
     //
-    case class Tamponné(uid: UID, time: Instant)
+    case class Stamp(uid: UID, time: Instant)
   }
 }

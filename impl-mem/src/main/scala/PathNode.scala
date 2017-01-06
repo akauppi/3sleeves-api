@@ -4,6 +4,8 @@ import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
 import scala.util.{Failure, Success, Try}
 import akka.pattern.ask
+import impl.calot.AnyNode.AnyNodeActor
+import threeSleeves.StreamsAPI.UID
 
 import scala.util.Failure
 import tools.RelPath
@@ -57,7 +59,7 @@ object PathNode {
   * - keeps a list of the children
   */
   private
-  class PathNodeActor private ( initial: Map[String,AnyNode] ) extends Actor {
+  class PathNodeActor private ( creator: UID, initial: Map[String,AnyNode] ) extends AnyNodeActor(creator) {
     import PathNodeActor._
 
     private
@@ -81,6 +83,12 @@ object PathNode {
 
       deepest
     }
+
+    /*
+    * tbd. Should disallow creating new streams
+    */
+    override
+    def onSeal(): Unit = ???
 
     def receive = {
       // Find 'rp' at this stage, or below us.

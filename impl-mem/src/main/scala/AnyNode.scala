@@ -1,7 +1,11 @@
 package impl.calot
 
-import akka.actor.ActorRef
+import java.time.Instant
+
+import akka.actor.{Actor, ActorRef}
+import impl.calot.LogNode.LogNodeActor.Stamp
 import impl.calot.tools.RelPath
+import threeSleeves.StreamsAPI.UID
 
 import scala.util.Try
 
@@ -15,4 +19,34 @@ import scala.util.Try
 abstract class AnyNode {
 
   //def ref: ActorRef
+}
+
+object AnyNode {
+
+  //--- Actor stuff ---
+  //
+  // Common things for both 'LogNodeActor' and 'PathNodeActor'
+  //
+  abstract class AnyNodeActor(creator: UID) extends Actor {
+    protected
+    val created: Stamp = Stamp(creator,Instant.now())
+
+    protected
+    var `sealed`: Option[Stamp] = None
+
+    private
+    def seal(uid: UID): Unit = {
+
+      if (`sealed`.isEmpty) {   // ignore multiple seals
+        `sealed` = Some(Stamp(uid,Instant.now()))
+
+        onSeal()
+      }
+    }
+
+    protected
+    def onSeal(): Unit
+  }
+
+
 }

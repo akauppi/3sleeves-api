@@ -4,6 +4,7 @@ import java.time.{Instant, Period}
 
 import akka.stream.scaladsl.{Flow, Source}
 
+import scala.concurrent.Future
 import scala.util.Try
 
 trait StreamsAPI {
@@ -16,7 +17,7 @@ trait StreamsAPI {
   //    Success(false) if it was already there
   //    Failure(Unauthorized)
   //
-  def create( path: String )(implicit uid: UID): Try[Boolean]
+  def create[Rec <: Record]( path: String, uid: UID ): Future[Try[Boolean]]
 
   // Open a stream for writing to a log
   //
@@ -29,7 +30,7 @@ trait StreamsAPI {
   //    but provide the client a means to know, which data got persisted in the back end. The numbers are expected to
   //    be incrementing, and not every one of them will be returned (only the largest ones persisted).
   //
-  def write( path: String )(implicit uid: UID): Try[Flow[Tuple2[Long,Seq[Array[Byte]]],Long,_]]
+  def write[Rec <: Record]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Long,Seq[Rec]],Long,_]]]
 
   // Read a stream
   //
@@ -49,18 +50,18 @@ trait StreamsAPI {
   //
   //      Note: If we have need for 'LastAvailable', that can be easily supported.
   //
-  def read( path: String, at: ReadPos )(implicit uid: UID): Try[Source[Tuple3[ReadPos,UID,Seq[Array[Byte]]],_]]
+  def read[Rec <: Record]( path: String, at: ReadPos ): Future[Try[Source[Tuple3[ReadPos,UID,Seq[Rec]],_]]]
 
   // Snapshot of the status of a log or path
   //
-  def status( path: String )(implicit uid: UID): Status
+  def status( path: String ): Future[Try[AnyStatus]]
 
   // Watch for new logs
   //
   // Currently existing logs and sub-paths (indicated by the trailing '/' in their name) are listed in the first batch;
   // if the path is empty, the first batch is also empty. Subsequent batches represent new logs and paths.
   //
-  def watch( path: String )(implicit uid: UID): Try[Source[Seq[String],_]]
+  def watch( path: String ): Future[Try[Source[Seq[String],_]]]
 
   // Seal a log or a path
   //
@@ -70,19 +71,21 @@ trait StreamsAPI {
   //    Failure(Unautorized)
   //    Failure(NotFound)
   //
-  def seal( path: String )(implicit uid: UID): Try[Boolean]
+  def seal( path: String, uid: UID ): Future[Try[Boolean]]
 }
 
 object StreamsAPI {
 
   case class UID(s: String)
 
-  /* disabled
-  object UID {
-    val none = UID("")    // used in creating the
+  abstract class Record
+  object Record {
+    class KeylessRecord(data: Array[Byte]) extends Record
+    class KeyedRecord(key: String, data: Array[Byte]) extends Record
   }
-  */
 
+  // Failures
+  //
   class Unauthorized(msg: String) extends RuntimeException(msg)
   class NotFound(msg: String) extends RuntimeException(msg)
 
@@ -103,32 +106,44 @@ object StreamsAPI {
     //implicit val ord: Ordering[ReadPos] = Ordering.by((x:ReadPos) => x.v)
   }
 
-  sealed abstract class Status {
-    val created: Tuple2[String,Instant]
-    val `sealed`: Option[Tuple2[String,Instant]]
+  abstract class AnyStatus {
+    val created: Tuple2[UID,Instant]
+    val `sealed`: Option[Tuple2[UID,Instant]]
   }
 
   case class PathStatus(
-    created: Tuple2[String,Instant],
-    `sealed`: Option[Tuple2[String,Instant]],
+    created: Tuple2[UID,Instant],
+    `sealed`: Option[Tuple2[UID,Instant]],
     logs: Seq[String],
     subPaths: Seq[String]
-  ) extends Status
+  ) extends AnyStatus
 
-  case class LogStatus(
-    created: Tuple2[String,Instant],
-    `sealed`: Option[Tuple2[String,Instant]],
-    oldestAvailable: ReadPos, // or same as 'nextPos' if log is empty
+  abstract class AnyLogStatus extends AnyStatus {
+    val oldestPos: ReadPos   // or same as 'nextPos' if log is empty
+    val nextPos: ReadPos
+
+    assert( oldestPos.v <= nextPos.v )
+
+    //def isEmpty: Boolean = oldestPos == nextPos
+  }
+
+  case class KeylessLogStatus(
+   created: Tuple2[UID,Instant],
+   `sealed`: Option[Tuple2[UID,Instant]],
+    oldestPos: ReadPos,   // or same as 'nextPos' if log is empty
     nextPos: ReadPos,
     retentionTime: Option[Period],
     retentionSpace: Option[Long]
-  ) extends Status {
+  ) extends AnyLogStatus
 
-    assert( oldestAvailable.v <= nextPos.v )
+  case class KeyedLogStatus(
+   created: Tuple2[UID,Instant],
+   `sealed`: Option[Tuple2[UID,Instant]],
+    oldestPos: ReadPos,   // or same as 'nextPos' if log is empty
+    nextPos: ReadPos
+  ) extends AnyLogStatus
 
-    def isEmpty: Boolean = oldestAvailable == nextPos
-  }
-
+  /* disabled
   sealed abstract class Access
   object Access {
     case object Create extends Access
@@ -138,4 +153,5 @@ object StreamsAPI {
     case object Watch extends Access
     case object Seal extends Access
   }
+  */
 }
