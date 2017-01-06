@@ -41,8 +41,8 @@ libraryDependencies ++= Seq(
 )
 ***/
 
-lazy val `three-sleeves-api` = project.in(file("."))
-  .aggregate(api, `api-testkit`, `impl-plain-mem`)
+lazy val `three-sleeves` = project.in(file("."))
+  .aggregate(api, `test-suite`, `impl-mem`)
 
 lazy val api = project
   .settings(
@@ -54,7 +54,9 @@ lazy val api = project
     )
   )
 
-lazy val `api-testkit` = project
+// Conformance suite - each 'impl-...' should use this in its tests.
+//
+lazy val `test-suite` = project
   .settings(
     libraryDependencies ++= Seq(
       akkaStream,
@@ -65,7 +67,9 @@ lazy val `api-testkit` = project
   )
   .dependsOn(api)
 
-lazy val `impl-plain-mem` = project
+// Nickname "Calot" - plain memory implementation for testing
+//
+lazy val `impl-mem` = project
   .settings(
     libraryDependencies ++= Seq(
       akkaStream,
@@ -74,4 +78,16 @@ lazy val `impl-plain-mem` = project
       scalaTest
     )
   )
-  .dependsOn(api, `api-testkit` % "compile->test")
+  .dependsOn(api, `test-suite` % "compile->test")
+
+// For experiments, not part of the project
+//
+lazy val playground = project
+  .settings(
+    libraryDependencies ++= Seq(
+      akkaStream,
+      //config,
+      //
+      scalaTest
+    )
+  )

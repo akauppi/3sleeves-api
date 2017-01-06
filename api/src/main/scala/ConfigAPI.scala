@@ -2,7 +2,7 @@ package threeSleeves
 
 import akka.stream.scaladsl.{Source}
 import com.typesafe.config.{Config, ConfigValue}
-import threeSleeves.StreamsAPI.BearerToken
+import threeSleeves.StreamsAPI.UID
 
 import scala.util.Try
 
@@ -18,7 +18,7 @@ object ConfigAPI {
   //    Failure(Unauthorized)
   //    Failure(NotFound)
   //
-  def open( base: Config, path: String )(implicit token: BearerToken): Try[Source[Set[Tuple2[String,ConfigValue]],_]] = {
+  def open( base: Config, path: String )(implicit token: UID): Try[Source[Set[Tuple2[String,ConfigValue]],_]] = {
 
     ???
   }

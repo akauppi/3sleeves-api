@@ -34,6 +34,17 @@ Data content is opaque to us, but e.g. Three Sleeves Configuration API will use 
 
 Note: The main focus of Asko (the original author) is to work on the interface. If you are more interested in the implementation, please say so and take lead on those.
 
+## Design
+
+- make each log be *either* keyed, or keyless. This way, e.g. configuration API can require a keyed stream.
+  - Only non-keyed streams support size and time retention
+ 
+
+## Dependencies
+
+- Track [Akka Typed](http://doc.akka.io/docs/akka/current/scala/typed.html#typed-scala) and start using it once it's no longer experimental (i.e. when the chances of interface changes are small enough).
+
+
 ## Open issues
 
 Write may fail - how to communicate that over Websockets?
