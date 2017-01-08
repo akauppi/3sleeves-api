@@ -4,31 +4,25 @@ import java.io.Closeable
 import java.time.Instant
 
 import akka.actor.{Actor, ActorRef}
-import impl.calot.AnyNode.AnyNodeActor.Msg
-import impl.calot.LogNode.LogNodeActor.Stamp
-import impl.calot.tools.RelPath
-import threeSleeves.StreamsAPI.{UID,Stamp,Status}
+import threeSleeves.StreamsAPI.UID
 
 import scala.concurrent.Future
-import scala.util.Try
 import akka.pattern.ask
 
 /*
-* Common base class for 'LogNode' and 'PathNode'.
+* Common base class for '..LogNode' and 'BranchNode'.
 *
-* Helps the 'PathNodeActor' quite essentially, allowing it to deal with both children the same. The ground reason for
-* this is to keep logs and subpaths from using the same name (akin to how one cannot have a directory and a file with
-* the same name in common file systems, though for the computer there's no reason not to).
+* Note: There's not much common functionality (e.g. 'Status' is similar, but since each returns their own variant,
+*     it's implemented in the derived classes). However, this helps 'BranchNode's to keep both logs and branches
+*     in the same collection.
+*
+* Note: Let's not make the nodes 'Closeable'. We don't really need it, and since they are essentially actors, the
+*     whole system can be closed down by terminating the 'ActorSystem'.
 */
-abstract class AnyNode(ref: ActorRef) extends Closeable {
+abstract class AnyNode/*(ref: ActorRef)*/ {
   import AnyNode._
-  import AnyNodeActor.Msg._
 
-  type Status     // should derive from 'AnyNode.Status' (is there a way to model that in #Scala?)
-
-  def status: Future[Status] = (ref ? AskStatus).map(_.asInstanceOf[Status])
-
-  def seal: Future[Boolean] = (ref ? AskSeal).map(_.asInstanceOf[Boolean])
+  def seal: Future[Boolean] //disabled: = (ref ? AnyNodeActor.Seal).map(_.asInstanceOf[Boolean])
 }
 
 object AnyNode {
@@ -38,30 +32,45 @@ object AnyNode {
   // Common things for all node actors
   //
   abstract class AnyNodeActor(creator: UID) extends Actor {
-    protected
-    val created: Stamp = Stamp(creator,Instant.now())
+    //import AnyNodeActor._
 
     protected
-    var `sealed`: Option[Stamp] = None
+    val created = Tuple2(creator,Instant.now())
 
+    private
+    var sealedVar: Option[Tuple2[UID,Instant]] = None
+
+    protected
+    def `sealed` = sealedVar    // don't expose the 'var' to derived classes
+
+    // Derived classes should override this, to add in their work during a seal.
+    //
     protected
     def seal(uid: UID): Boolean = {   // 'true' if was sealed now
       val fresh = `sealed`.isEmpty
 
       if (fresh) {   // ignore multiple seals
-        `sealed` = Some(Stamp(uid,Instant.now()))
+        sealedVar = Some(Tuple2(uid,Instant.now()))
       }
       fresh
     }
+
+    /*** disabled
+    // Messages the derived classes did not handle
+    //
+    def receive = {
+      case Seal(uid) => sender ! seal(uid)
+    }
+    ***/
   }
 
+  /*** disabled
   object AnyNodeActor {
-    // Messages common to Log and Path nodes
+    // Messages common (with same return type) to Log and Path nodes
     //
-    /*sealed*/ abstract class Msg
-    object Msg {
-      case object AskStatus extends Msg
-      case object AskSeal extends Msg
-    }
+    sealed abstract class Msg
+
+    case class Seal(uid: UID) extends Msg
   }
+  ***/
 }

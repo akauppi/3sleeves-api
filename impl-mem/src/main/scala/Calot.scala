@@ -3,7 +3,8 @@ package impl.calot
 import java.time.Instant
 
 import akka.stream.scaladsl.{Flow, Sink, Source}
-import impl.calot.tools.RelPath
+import impl.calot.tools.AnyPath.{BranchPath, LogPath}
+import impl.calot.tools.AnyPath
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI._
 
@@ -16,31 +17,42 @@ import scala.util.{Failure, Success, Try}
 *
 * Note: There's no use for such except for as "customer 0" for Three Sleeves API.
 */
-object Calot extends StreamsAPI {
+class Calot extends StreamsAPI {
 
   private
-  val root = PathNode.root
+  val root = BranchNode.root
 
-  // Create a path or a log
+  // Create a branch
   //
   override
-  def create( path: String, lt: LogType, uid: UID ): Future[Try[Boolean]] = {
+  def createBranch( path: String, uid: UID ): Future[Try[Boolean]] = {
+    val bp: BranchPath = BranchPath.fromAbs(path)    // may throw 'InvalidArgumentException'
 
-    val rp = RelPath(path)
+    var fresh: Boolean = false
 
-    var created: Boolean = false
+    val fut: Future[Try[BranchNode]] = root.find( bp, () => {
+      fresh = true
+      BranchNode(bp,uid)
+    })
 
-    def create(): AnyNode = {
-      rp.lastStageName match {
-        case x if x.endsWith("/") => PathNode(x,uid)
-        case x if !keyed => KeylessLogNode(x,uid)
-        case x => KeyedLogNode(x,uid)
-      }
-    }
+    fut.map( x => x.map(_ => fresh) )
+  }
 
-    val fut: Future[Try[AnyNode]] = root.find( rp, Some(create) )
+  // Create a log
+  //
+  override
+  def createLog( path: String, keyed: Boolean, uid: UID ): Future[Try[Boolean]] = {
+    val lp: LogPath = LogPath.fromAbs(path)   // may throw 'InvalidArgumentException'
 
-    fut.map( x => x.map(_ => created) )
+    var fresh: Boolean = false
+
+    val fut: Future[Try[LogNode]] = root.find( lp, () => {
+      fresh = true
+      if (keyed) KeylessLogNode(lp,uid)
+      else KeyedLogNode(lp,uid)
+    } )
+
+    fut.map( x => x.map(_ => fresh) )
   }
 
   override

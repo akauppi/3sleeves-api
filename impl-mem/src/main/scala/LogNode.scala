@@ -17,7 +17,7 @@ import scala.concurrent.Future
 /*
 * A node presenting a log stream
 */
-class LogNode[Rec <: LogNode.Record] private (ref: ActorRef) extends AnyNode {
+class LogNode[R : (R) => Array[Byte]] private (ref: ActorRef) extends AnyNode {
   import LogNodeActor.Msg._
 
   // Note: The 'Long' can be provided by the caller. It's an opaque field for the implementation.
@@ -28,6 +28,8 @@ class LogNode[Rec <: LogNode.Record] private (ref: ActorRef) extends AnyNode {
 }
 
 object LogNode {
+  import AnyNode.Stamp
+
   // Note: The 'name' parameter is simply for tracking actors, and debugging (but it may be useful)
   //
   def apply[Rec <: Record](name: String, creator: UID)(implicit as: ActorSystem): LogNode[Rec] = {
@@ -52,15 +54,11 @@ object LogNode {
   }
 
   case class Status(
-                     oldestPos: ReadPos,   // == 'nextPos' if log is empty
-                     nextPos: ReadPos,     // smallest unused position
-                     created: Stamp,
-                     `sealed`: Option[Stamp]
-                   )
-
-  // https://youtu.be/-JqL2WIkaB4 :)
-  //
-  case class Stamp(uid: UID, time: Instant)
+    oldestPos: ReadPos,   // == 'nextPos' if log is empty
+    nextPos: ReadPos,     // smallest unused position
+    created: Stamp,
+    `sealed`: Option[Stamp]
+  )
 
 
   //--- Actor stuff ---

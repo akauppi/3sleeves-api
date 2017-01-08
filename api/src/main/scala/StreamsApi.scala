@@ -10,21 +10,33 @@ import scala.util.Try
 trait StreamsAPI {
   import StreamsAPI._
 
-  // Create a path or a log
+  // Create a branch
   //
   // Returns:
   //    Success(true) if we created the entry (and possibly entries leading to it)
   //    Success(false) if it was already there
+  //    Failure(Mismatch) if some level in the path, expected to be a branch, was already claimed by a log.
   //
-  // Note: This can be used also for creating just a path. Have 'path' end with a slash. Value of 'lt' will be ignored.
-  //      (this does not seem ideal interface..)
+  // Throws:
+  //    'InvalidArgumentException' if 'path' is not as expected
   //
-  def create( path: String, lt: LogType, uid: UID ): Future[Try[Boolean]]
+  // path:  Absolute path for a branch (ends in a slash).
+  //
+  def createBranch( path: String, uid: UID ): Future[Try[Boolean]]
 
-  sealed trait LogType {
-    case object KeylessLog extends LogType
-    case object KeyedLog extends LogType
-  }
+  // Create a log
+  //
+  // Returns:
+  //    Success(true) if we created the entry (and possibly entries leading to it)
+  //    Success(false) if it was already there
+  //    Failure(Mismatch) if some level in the path, expected to be a branch, was already claimed by a log.
+  //
+  // Throws:
+  //    'InvalidArgumentException' if 'path' is not as expected
+  //
+  // path:  Absolute path for a log (does not end in a slash).
+  //
+  def createLog( path: String, keyed: Boolean, uid: UID ): Future[Try[Boolean]]
 
   // Open a stream for writing to a keyless log
   //
@@ -184,5 +196,5 @@ object StreamsAPI {
 
   // Failures
   //
-  class NotFound(msg: String) extends RuntimeException(msg)
+  case class NotFound(msg: String) extends RuntimeException(msg)
 }
