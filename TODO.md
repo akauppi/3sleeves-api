@@ -39,6 +39,10 @@ Data content is opaque to us, but e.g. Three Sleeves Configuration API will use 
 
 Note: The main focus of Asko (the original author) is to work on the interface. If you are more interested in the implementation, please say so and take lead on those.
 
+## Naming
+
+- call `PathNode` `BranchNode` 
+
 ## Design
 
 - make each log be *either* keyed, or keyless. This way, e.g. configuration API can require a keyed stream.
@@ -48,6 +52,16 @@ Note: The main focus of Asko (the original author) is to work on the interface. 
 ## Dependencies
 
 - Track [Akka Typed](http://doc.akka.io/docs/akka/current/scala/typed.html#typed-scala) and start using it once it's no longer experimental (i.e. when the chances of interface changes are small enough).
+
+
+## Design / ideas
+
+- could emulate something like symlinks. If we do the directory layer essentially as configuration, it would be merely a thing in there.
+
+
+## Adapters
+
+- Could do an adapter just for [etcd](https://coreos.com/etcd/).
 
 
 ## Open issues

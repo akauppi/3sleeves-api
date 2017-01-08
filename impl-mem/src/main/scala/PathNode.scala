@@ -44,7 +44,7 @@ object PathNode {
 
   // Note: The 'name' parameter is simply for tracking actors, and debugging (but it may be useful)
   //
-  private
+  //private
   def apply(name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): PathNode = {
     new PathNode( as.actorOf( Props(classOf[PathNodeActor], initial), name = name) )
   }

@@ -8,6 +8,7 @@ import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI._
 
 import scala.concurrent.Future
+import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 
 /*
@@ -18,19 +19,24 @@ object Calot extends StreamsAPI {
   private
   val root = PathNode.root
 
-  // tbd. What is this supposed to do?
+  // Create a path or a log
   //
   override
-  def create( path: String, uid: UID ): Future[Try[Boolean]] = {
+  def create( path: String, keyed: Boolean, uid: UID ): Future[Try[Boolean]] = {
 
-    // tbd. Need a parameter to know if we're creating a key or keyless log. Maybe logs should be created outside
-    //    of Three Sleeves API.
-    //
+    val rp = RelPath(path)
+
     var created: Boolean = false
 
-    def create(): AnyNode = ???
+    def create(): AnyNode = {
+      rp.lastStageName match {
+        case x if x.endsWith("/") => PathNode(x,uid)
+        case x if !keyed => KeylessLogNode(x,uid)
+        case x => KeyedLogNode(x,uid)
+      }
+    }
 
-    val fut: Future[Try[AnyNode]] = root.find( RelPath(path), Some(create) )
+    val fut: Future[Try[AnyNode]] = root.find( rp, Some(create) )
 
     fut.map( x => x.map(_ => created) )
   }
@@ -98,18 +104,4 @@ object Calot extends StreamsAPI {
   def seal( path: String )(implicit uid: UID): Try[Boolean] = {
     ???
   }
-
-  /*
-  * Split at the last '/'.
-  */
-  private
-  def splitPath(s: String): Tuple2[String,String] = {
-    ???
-  }
-
-  private
-  def skipUntil( source: Source[ReadPos,UID,Seq[Array[Byte]]], n: Long ) = {
-    source.filter( _._1 >= n )
-  }
-
 }
