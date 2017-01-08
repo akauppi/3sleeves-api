@@ -46,11 +46,14 @@ trait StreamsAPI {
   //
   // Returns:
   //    Success(flow) if successful
-  //      flow translates `(n,seq(key,data))` to 'n's that got persisted in the back end
+  //      flow translates `(tag,map(key,data))` to 'tag's that got persisted in the back end (see 'writeKeyless' for more
+  //          information on the tag handling; it is the same)
   //
-  // Note: This is otherwise the same as 'writeKeyless' but the content is a key-data tuple.
+  // The values provided at once appear atomically to the consumers (i.e. either all, or none, and at the same time).
   //
-  def writeKeyed[R : R => Array[Byte],Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Seq[Tuple2[String,R]]],Tag,_]]]
+  // Note: This is otherwise the same as 'writeKeyless' but the content is a key-data map.
+  //
+  def writeKeyed[R : R => Array[Byte],Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Map[String,R]],Tag,_]]]
 
   // Read a keyless stream
   //
@@ -89,14 +92,10 @@ trait StreamsAPI {
   //
   // nb. providing the 'ReadPos' for each entry provides less - or different - value than in reading a keyless stream.
   //    There, such position is often stored so that re-reading can continue with very little or no duplicates. With
-  //    keyed logs, since we can always get an initial state, storing positions is not required. Still, 'ReadPos' can
-  //    be useful in other ways, for e.g. detecting which entries were written atomically (they share the same 'ReadPos').
-  //    We could get the same benefit by dropping 'ReadPos' and providing a 'Seq[R]' instead; or by simply having a flag
-  //    that shows 'atomic with the next entry'.
+  //    keyed logs, since we can always get an initial state, storing positions is not required. There may be no use
+  //    case for keeping it in the stream, but let's see.
   //
-  //    Notice that 'KeyedLogStatus' does not expose oldest and newest positions. They are not deemed needed.
-  //
-  def readKeyed[R: Array[Byte] => R]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,R],Source[Tuple4[ReadPos,Metadata,String,R],_]]]]
+  def readKeyed[R: Array[Byte] => R]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,R],Source[Tuple3[ReadPos,Metadata,Map[String,R]],_]]]]
 
   // Snapshot of the status of a log or path
   //

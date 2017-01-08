@@ -18,7 +18,7 @@ object ConfigAPI {
   //    Failure(Unauthorized)
   //    Failure(NotFound)
   //
-  def open( base: Config, path: String )(implicit token: UID): Try[Source[Set[Tuple2[String,ConfigValue]],_]] = {
+  def open( base: Config, keyedLogPath: String ): Try[Tuple2[Config,Source[Map[String,ConfigValue]],_]] = {
 
     ???
   }

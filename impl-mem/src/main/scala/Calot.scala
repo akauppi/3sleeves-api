@@ -12,7 +12,9 @@ import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 
 /*
-* Implementation that is all-memory, no persistence. There's no use for such except for as "customer 0" for 3Sleeves API.
+* Implementation that is all-memory, no persistence.
+*
+* Note: There's no use for such except for as "customer 0" for Three Sleeves API.
 */
 object Calot extends StreamsAPI {
 
@@ -22,7 +24,7 @@ object Calot extends StreamsAPI {
   // Create a path or a log
   //
   override
-  def create( path: String, keyed: Boolean, uid: UID ): Future[Try[Boolean]] = {
+  def create( path: String, lt: LogType, uid: UID ): Future[Try[Boolean]] = {
 
     val rp = RelPath(path)
 
