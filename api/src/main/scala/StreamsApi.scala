@@ -10,6 +10,9 @@ import scala.util.Try
 trait StreamsAPI {
   import StreamsAPI._
 
+  type Marshaller[R] = R => Array[Byte]
+  type Unmarshaller[R] = Array[Byte] => R
+
   // Create a branch
   //
   // Returns:
@@ -52,7 +55,7 @@ trait StreamsAPI {
   //    records are guaranteed to be appended to the log together, with no other seeping in between them.
   //    Any such records get the same 'ReadPos' in reading, making sure they are always either all read, or none of them.
   //
-  def writeKeyless[R : R => Array[Byte],Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Seq[R]],Tag,_]]]
+  def writeKeyless[R: Marshaller,Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Seq[R]],Tag,_]]]
 
   // Open a stream for writing to a keyed log
   //
@@ -65,7 +68,7 @@ trait StreamsAPI {
   //
   // Note: This is otherwise the same as 'writeKeyless' but the content is a key-data map.
   //
-  def writeKeyed[R : R => Array[Byte],Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Map[String,R]],Tag,_]]]
+  def writeKeyed[R: Marshaller,Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Map[String,R]],Tag,_]]]
 
   // Read a keyless stream
   //
@@ -87,7 +90,7 @@ trait StreamsAPI {
   //        `ReadPos.EarliestAvailable` start at the earliest still available offset (NOT SUPPORTED)
   //        `ReadPos.LastAvailable` start at the last value, if values exist, otherwise from the next value (NOT SUPPORTED)
   //
-  def readKeyless[R: Array[Byte] => R]( path: String, at: ReadPos ): Future[Try[Source[Tuple3[ReadPos,Metadata,R],_]]]
+  def readKeyless[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Source[Tuple3[ReadPos,Metadata,R],_]]]
 
   // Read a keyed stream
   //
@@ -107,7 +110,7 @@ trait StreamsAPI {
   //    keyed logs, since we can always get an initial state, storing positions is not required. There may be no use
   //    case for keeping it in the stream, but let's see.
   //
-  def readKeyed[R: Array[Byte] => R]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,R],Source[Tuple3[ReadPos,Metadata,Map[String,R]],_]]]]
+  def readKeyed[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,R],Source[Tuple3[ReadPos,Metadata,Map[String,R]],_]]]]
 
   // Snapshot of the status of a log or path
   //
@@ -144,6 +147,10 @@ object StreamsAPI {
 
   case class UID(s: String)
 
+  object UID {
+    val Root = UID("")
+  }
+
   case class ReadPos private (v: Long) extends AnyVal
 
   object ReadPos {
@@ -170,7 +177,7 @@ object StreamsAPI {
     val `sealed`: Option[Tuple2[UID,Instant]]
   }
 
-  case class PathStatus(
+  case class BranchStatus(
     created: Tuple2[UID,Instant],
     `sealed`: Option[Tuple2[UID,Instant]],
     logs: Set[String],

@@ -1,13 +1,16 @@
 package impl.calot
 
-import akka.actor.{ActorRef, ActorSystem, Props}
+import java.time.Instant
+
+import akka.actor.Actor.Receive
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
 import scala.util.{Success, Try}
 import akka.pattern.ask
 import impl.calot.AnyNode.AnyNodeActor
 import impl.calot.tools.AnyPath.BranchPath
 import threeSleeves.StreamsAPI
-import threeSleeves.StreamsAPI.UID
+import threeSleeves.StreamsAPI.{BranchStatus, UID}
 
 import scala.util.Failure
 import tools.AnyPath
@@ -17,7 +20,7 @@ import scala.concurrent.Future
 /*
 * Node for a certain path (akin to directory).
 */
-class BranchNode private (val ref: ActorRef) extends AnyNode/*(ref)*/ {
+class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) extends AnyNode(created) {
   import BranchNode._
 
   // Find a log or branch node
@@ -33,9 +36,32 @@ class BranchNode private (val ref: ActorRef) extends AnyNode/*(ref)*/ {
   //  Failure(Mismatch) if the path contains an interim stage that exists as a log, or
   //                  if we're looking for dir/log but found the other type
   //
-  def find[T <: AnyNode](ap: AnyPath, gen: Option[Function1[AnyPath,T]])(implicit as: ActorSystem): Future[Try[T]] = {
+  private
+  def find[T <: AnyNode](ap: AnyPath, gen: Option[Function1[String,T]])(implicit as: ActorSystem): Future[Try[T]] = {
 
     (ref ? BranchNodeActor.Find(ap, gen)).map( _.asInstanceOf[Try[T]] )
+  }
+
+  def find[T <: AnyNode](ap: AnyPath, gen: Function1[String,T])(implicit as: ActorSystem): Future[Try[T]] = {
+    find(ap, Some(gen))
+  }
+
+  def find[T <: AnyNode](ap: AnyPath)(implicit as: ActorSystem): Future[Try[T]] = {
+    find(ap, None)
+  }
+
+  def status: Future[BranchStatus] = {
+    (ref ? BranchNodeActor.Status).map {
+      case x: Map[String,Any] =>
+        val (branches: Seq[String], logs: Seq[String]) = x.get("names").asInstanceOf[Iterable[String]].partition( _.endsWith("/") )
+
+        BranchStatus(
+          created = created,
+          `sealed` = x.get("sealed").asInstanceOf[Option[Tuple2[UID,Instant]]],
+          logs = logs.toSet,
+          branches = branches.toSet
+        )
+    }
   }
 
   def seal: Future[Boolean] = (ref ? BranchNodeActor.Seal).map(_.asInstanceOf[Boolean])
@@ -46,15 +72,21 @@ object BranchNode {
   // Provides a new path root
   //
   def root(implicit as: ActorSystem): BranchNode = {
-    BranchNode("/")
+    BranchNode(UID.Root, "/")
   }
 
   // Note: The 'name' parameter is simply for tracking actors
   //
   //private
-  def apply(name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): BranchNode = {
-    new BranchNode( as.actorOf( Props(classOf[BranchNodeActor], initial), name = name) )
+  def apply(creator: UID, createdAt: Instant, name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): BranchNode = {
+    new BranchNode( Tuple2(creator,createdAt), as.actorOf( Props(classOf[BranchNodeActor], initial), name = name) )
   }
+
+  /*** disabled
+  def apply(creator: UID, name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): BranchNode = {
+    BranchNode( Tuple2(creator,Instant.now()), name, initial )
+  }
+  ***/
 
   //--- Actor side ---
   //
@@ -66,7 +98,7 @@ object BranchNode {
   * - keeps a list of the children
   */
   private
-  class BranchNodeActor private ( creator: UID, initial: Map[String,AnyNode] ) extends AnyNodeActor(creator) {
+  class BranchNodeActor private ( creator: UID, initial: Map[String,AnyNode] ) extends Actor with AnyNodeActor {
     import BranchNodeActor._
 
     private
@@ -76,7 +108,7 @@ object BranchNode {
       // Find 'ap' at this stage, or below us.
       //
       case Find(ap,gen) =>
-        val name = ap.name
+        val name = ap.name    // name of this stage
 
         children.get(name) match {
           case Some(node) if ap.isLastStage =>
@@ -89,23 +121,37 @@ object BranchNode {
             Failure( StreamsAPI.NotFound(s"Not found the ${if (ap.isInstanceOf[BranchPath]) "branch" else "log"}: $ap") )
 
           case None =>    // create and attach
-            val last: AnyNode = gen.get(ap)
+            val endNode: AnyNode = gen.get(ap.last.name)
 
             // Create the intermediate levels, if any, using the same creation stamp as for the 'last' node
             //
-            val (uid, instant) = last.created     // tbd. don't have access to there..
+            val created = endNode.created
 
-            val tmp: Seq[String] = ???    // tbd. names of level from 'ap'..to the last-but-one (all branches, or an empty sequence if 'last' can be tied directly).
+            // Names of level from 'ap'..to the last-but-one (all branches, or an empty sequence if 'last' can be tied directly).
+            //
+            val tmp: Seq[String] = ap.tail.map(_.name).drop(1)
 
-            val (node: AnyNode,_) = tmp.foldRight( Tuple2(last,ap.last.name) ){ (name: String, b: Tuple2[AnyNode,String]) => {
+            val (node: AnyNode,_) = tmp.foldRight( Tuple2(endNode,ap.last.name) ){ (name: String, b: Tuple2[AnyNode,String]) => {
               val (bNode: AnyNode, bName: String) = b
 
-              Tuple2( BranchNode(name,Map(bName -> bNode)), name )
+              Tuple2( BranchNode(created._1, created._2, name,Map(bName -> bNode)), name )
             }}
 
             children += name -> node
-            Success(last)
+            Success(endNode)
         }
+
+      // Status
+      //
+      case Status =>
+        // 'created' is kept in the 'BranchNode'; we don't know it
+
+        val names: Iterable[String] = children.map {
+          case (name,node) if node.isInstanceOf[BranchNode] => name + "/"
+          case (name,_) => name
+        }
+
+        sender ! Map("sealed" -> `sealed`, "names" -> names)
 
       // Sealing a branch means no futher logs are allowed to be created (in this stage). Nothing more.
       //
@@ -120,7 +166,8 @@ object BranchNode {
 
     // Messages
     //
-    case class Find(rp: AnyPath, gen: Option[Function1[AnyPath,AnyNode]])   // -> Try[AnyNode]
+    case class Find(rp: AnyPath, gen: Option[Function1[String,AnyNode]])   // -> Try[AnyNode]
+    case object Status          // -> TupleN[...]
     case class Seal(uid: UID)   // -> Try[Boolean]
   }
 }

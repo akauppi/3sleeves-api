@@ -30,9 +30,9 @@ class Calot extends StreamsAPI {
 
     var fresh: Boolean = false
 
-    val fut: Future[Try[BranchNode]] = root.find( bp, () => {
+    val fut: Future[Try[BranchNode]] = root.find( bp, (s: String) => {    // create deepest stage
       fresh = true
-      BranchNode(bp,uid)
+      BranchNode(uid,Instant.now(),s)
     })
 
     fut.map( x => x.map(_ => fresh) )
@@ -46,10 +46,11 @@ class Calot extends StreamsAPI {
 
     var fresh: Boolean = false
 
-    val fut: Future[Try[LogNode]] = root.find( lp, () => {
+    val fut: Future[Try[LogNode]] = root.find( lp, (s: String) => {   // create deepest stage
       fresh = true
-      if (keyed) KeylessLogNode(lp,uid)
-      else KeyedLogNode(lp,uid)
+      val now = Instant.now()
+      if (keyed) KeylessLogNode(uid,now,s)
+      else KeyedLogNode(uid,now,s)
     } )
 
     fut.map( x => x.map(_ => fresh) )

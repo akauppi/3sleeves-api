@@ -18,8 +18,10 @@ import akka.pattern.ask
 *
 * Note: Let's not make the nodes 'Closeable'. We don't really need it, and since they are essentially actors, the
 *     whole system can be closed down by terminating the 'ActorSystem'.
+*
+* Note: creation stamp is immutable, thus does not need to kept within the actor.
 */
-abstract class AnyNode/*(ref: ActorRef)*/ {
+abstract class AnyNode (val created: Tuple2[UID,Instant]) {
   import AnyNode._
 
   def seal: Future[Boolean] //disabled: = (ref ? AnyNodeActor.Seal).map(_.asInstanceOf[Boolean])
@@ -27,21 +29,22 @@ abstract class AnyNode/*(ref: ActorRef)*/ {
 
 object AnyNode {
 
+  // Common status fields for all nodes
+  //
+  trait Status {
+    val created: Tuple2[UID,Instant]
+    val `sealed`: Option[Tuple2[UID,Instant]]
+  }
+
   //--- Actor stuff ---
   //
   // Common things for all node actors
   //
-  abstract class AnyNodeActor(creator: UID) extends Actor {
+  trait AnyNodeActor { self: Actor =>
     //import AnyNodeActor._
 
     protected
-    val created = Tuple2(creator,Instant.now())
-
-    private
-    var sealedVar: Option[Tuple2[UID,Instant]] = None
-
-    protected
-    def `sealed` = sealedVar    // don't expose the 'var' to derived classes
+    var `sealed`: Option[Tuple2[UID,Instant]] = None
 
     // Derived classes should override this, to add in their work during a seal.
     //
@@ -50,18 +53,10 @@ object AnyNode {
       val fresh = `sealed`.isEmpty
 
       if (fresh) {   // ignore multiple seals
-        sealedVar = Some(Tuple2(uid,Instant.now()))
+        `sealed` = Some(Tuple2(uid,Instant.now()))
       }
       fresh
     }
-
-    /*** disabled
-    // Messages the derived classes did not handle
-    //
-    def receive = {
-      case Seal(uid) => sender ! seal(uid)
-    }
-    ***/
   }
 
   /*** disabled

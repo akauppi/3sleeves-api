@@ -17,14 +17,14 @@ import scala.concurrent.Future
 /*
 * A node presenting a log stream
 */
-class LogNode[R : (R) => Array[Byte]] private (ref: ActorRef) extends AnyNode {
+class LogNode[R : Marshaller] private (ref: ActorRef) extends AnyNode {
   import LogNodeActor.Msg._
 
   // Note: The 'Long' can be provided by the caller. It's an opaque field for the implementation.
   //
-  def writeFlow: Future[Flow[Tuple2[Long,Rec],Long,_]] = (ref ? Write).map(_.asInstanceOf[Flow[Tuple2[Long,Rec],Long,_]])
+  def writeFlow: Future[Flow[Tuple2[Long,R],Long,_]] = (ref ? Write).map(_.asInstanceOf[Flow[Tuple2[Long,R],Long,_]])
 
-  def readSource(at: ReadPos): Future[Source[Tuple2[ReadPos,Rec],_]] = (ref ? Read(at)).map(_.asInstanceOf[Source[Tuple2[ReadPos,Rec],_]])
+  def readSource(at: ReadPos): Future[Source[Tuple2[ReadPos,R],_]] = (ref ? Read(at)).map(_.asInstanceOf[Source[Tuple2[ReadPos,R],_]])
 }
 
 object LogNode {

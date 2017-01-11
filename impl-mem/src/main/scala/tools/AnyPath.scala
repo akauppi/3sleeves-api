@@ -1,16 +1,19 @@
 package impl.calot.tools
 
-import scala.annotation.tailrec
+// tbd. make 'AnyPath' et.al. take care of one level only (just the name, and the type). This way, we can use
+//    'Seq[AnyPath]' to denote a full path and don't need to remake 'tail' etc. ourselves.
 
 /*
 * Relative path, of either a branch or a log as the final stage.
 */
 sealed
-abstract class AnyPath(val name: String, val tail: Option[AnyPath]) {
+abstract class AnyPath(val name: String, next: Option[this.type]) {
   import AnyPath._
   assert(name.nonEmpty)
 
-  def isLastStage: Boolean = tail.isEmpty
+  def isLastStage: Boolean = next.isEmpty
+
+  def tail: Seq[this.type] = next.map( x => x :: x.tail ).getOrElse(Seq.empty)
 
   def last: this.type = tail.map(_.last).getOrElse(this)
 }
