@@ -2,18 +2,15 @@ package impl.calot
 
 import java.time.Instant
 
-import akka.actor.Actor.Receive
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
 import scala.util.{Success, Try}
 import akka.pattern.ask
 import impl.calot.AnyNode.AnyNodeActor
-import impl.calot.tools.AnyPath.{BranchPath, LogPath}
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI.{BranchStatus, UID}
 
 import scala.util.Failure
-import tools.AnyPath
 
 import scala.concurrent.Future
 
@@ -32,11 +29,11 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
   //  Failure(Mismatch) if the path contains a stage that exists as a log
   //
-  def find(bp: BranchPath, gen: Option[Function1[String,BranchNode]])(implicit as: ActorSystem): Future[Try[BranchNode]] = {
+  def findBranch(names: Seq[String], gen: Option[(String) => BranchNode])(implicit as: ActorSystem): Future[Try[BranchNode]] = {
 
-    (ref ? BranchNodeActor.Find(bp, gen)).map{
+    (ref ? BranchNodeActor.FindAnyNode(names, gen)).map{
       case Success(node: BranchNode) => Success(node)
-      case Success(x) => Failure( Mismatch(s"Expected 'BranchNode', got '${x.getClass}'") )
+      case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected 'BranchNode', got '${x.getClass}'") )
       case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
     }
   }
@@ -50,15 +47,16 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
   //  Failure(Mismatch) if the path contains a stage that exists as a log, or if the final stage is not of expected type
   //
-  def find[R, T <: AnyLogNode[R]](lp: LogPath, gen: Option[Function1[String,T]])(implicit as: ActorSystem): Future[Try[T]] = {
+  def findLog[R, T <: AnyLogNode[R]](names: Seq[String], gen: Option[(String) => T])(implicit as: ActorSystem): Future[Try[T]] = {
 
-    (ref ? BranchNodeActor.Find(lp, gen)).map{
+    (ref ? BranchNodeActor.FindAnyNode(names, gen)).map{
       case Success(node: T) => Success(node)
-      case Success(x) => Failure( Mismatch(s"Expected '${classOf[T]}', got '${x.getClass}'") )
+      case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected '${classOf[T]}', got '${x.getClass}'") )
       case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
     }
   }
 
+  /*** disabled
   def find[R, T <: AnyLogNode[R]](lp: LogPath, gen: Function1[String,T])(implicit as: ActorSystem): Future[Try[T]] = {
     find(lp, Some(gen))
   }
@@ -66,7 +64,7 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   def find[R, T <: AnyLogNode[R]](lp: LogPath)(implicit as: ActorSystem): Future[Try[T]] = {
     find(lp, None)
   }
-
+  ***/
 
   // Get the status of the branch
   //
@@ -114,67 +112,87 @@ object BranchNode {
   * - keeps a list of the children
   */
   private
-  class BranchNodeActor private ( creator: UID, initial: Map[String,AnyNode] ) extends Actor with AnyNodeActor {
+  class BranchNodeActor private ( created: Tuple2[UID,Instant], initial: Map[String,AnyNode] ) extends Actor with AnyNodeActor {
     import BranchNodeActor._
 
     private
     var children: Map[String,AnyNode] = initial
 
     def receive: Receive = {
-      // Find 'ap' at this stage, or below us.
+      // Find a subbranch, or log node, or create one
       //
-      case Find(ap,gen) =>
-        val name = ap.name    // name of this stage
+      case FindAnyNode(names,gen) =>
+        val name = names.head   // name of next stage
 
-        children.get(name) match {
-          case Some(node) if ap.isLastStage =>
+        var forwarded = false
+
+        val res: Try[AnyNode] = children.get(name) match {
+          case Some(node: AnyNode) if names.tail.isEmpty =>
             Success(node)
 
           case Some(node: BranchNode) =>
-            node.ref forward Find(ap.tail.get,gen)    // dig deeper, report to original sender
+            node.ref forward FindAnyNode(names.tail,gen)    // dig deeper, report to original sender
+            forwarded = true
+            Success(null)
+
+          case Some(_) =>
+            Failure( StreamsAPI.Mismatch(s"A log exists where branch was expected: $name") )
 
           case None if gen.isEmpty =>
-            Failure( StreamsAPI.NotFound(s"Not found the ${if (ap.isInstanceOf[BranchPath]) "branch" else "log"}: $ap") )
+            Failure( StreamsAPI.NotFound(s"No such ${if (names.tail.nonEmpty) "branch" else "log"} and not going to create one: $name") )
 
           case None =>    // create and attach
-            val endNode: AnyNode = gen.get(ap.last.name)
+            val seed: AnyNode = gen.get.apply(names.last)
+            extend(names,seed)
+            Success(seed)
+        }
 
-            // Create the intermediate levels, if any, using the same creation stamp as for the 'last' node
-            //
-            val created = endNode.created
-
-            // Names of level from 'ap'..to the last-but-one (all branches, or an empty sequence if 'last' can be tied directly).
-            //
-            val tmp: Seq[String] = ap.tail.map(_.name).drop(1)
-
-            val (node: AnyNode,_) = tmp.foldRight( Tuple2(endNode,ap.last.name) ){ (name: String, b: Tuple2[AnyNode,String]) => {
-              val (bNode: AnyNode, bName: String) = b
-
-              Tuple2( BranchNode(created._1, created._2, name,Map(bName -> bNode)), name )
-            }}
-
-            children += name -> node
-            Success(endNode)
+        if (!forwarded) {
+          sender ! res
         }
 
       // Status
       //
       case Status =>
-        // 'created' is kept in the 'BranchNode'; we don't know it
-
         val names: Iterable[String] = children.map {
-          case (name,node) if node.isInstanceOf[BranchNode] => name + "/"
+          case (name,_: BranchNode) => name + "/"
           case (name,_) => name
         }
 
-        sender ! Map("sealed" -> `sealed`, "names" -> names)
+        val (b,a) = children.partition(_._2.isInstanceOf[BranchNode])
+
+        sender ! StreamsAPI.BranchStatus(
+          created = created,
+          `sealed` = `sealed`,
+          logs = a.keys.toSet,
+          branches = b.keys.toSet
+        )
 
       // Sealing a branch means no futher logs are allowed to be created (in this stage). Nothing more.
       //
       case Seal(uid) =>
         super.seal(uid)
 
-    } //disabled: .orElse(super.receive)   // fallback to 'AnyNodeActor' for 'Status' and 'Seal'
+    }
+
+    /*
+    * Extend the branch under 'names'. The deepest node is given as 'seed'.
+    */
+    private
+    def extend(names: Seq[String], seed: AnyNode): Unit = {
+      val seedName = names.last
+      val tmp: Seq[String] = names.reverse.drop(1)
+
+      val (creator: UID, createdAt: Instant) = seed.created
+
+      val (first: AnyNode,firstName) = tmp.foldRight( Tuple2(seed,seedName) ){ (aName: String, b: Tuple2[AnyNode,String]) => {
+        val (bNode: AnyNode, bName: String) = b
+
+        Tuple2( BranchNode(creator, createdAt, aName, Map(bName -> bNode)), aName )
+      }}
+
+      children += firstName -> first
+    }
   }
 
   private
@@ -182,9 +200,8 @@ object BranchNode {
 
     // Messages
     //
-    case class FindBranch(bp: BranchPath, gen: Option[Function1[String,BranchNode]])    // -> Try[BranchNode]
-    case class FindLog(lp: LogPath, gen: Option[Function1[String,AnyLogNode]])          // -> Try[AnyLogNode]
-    case object Status          // -> TupleN[...]
+    case class FindAnyNode(names: Seq[String], gen: Option[Function1[String,AnyNode]])         // -> Try[AnyNode]
+    case object Status          // -> BranchStatus
     case class Seal(uid: UID)   // -> Try[Boolean]
   }
 }

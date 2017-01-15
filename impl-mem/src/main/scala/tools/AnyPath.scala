@@ -1,5 +1,6 @@
 package impl.calot.tools
 
+/*** disabled, likely not needed at all?
 // tbd. make 'AnyPath' et.al. take care of one level only (just the name, and the type). This way, we can use
 //    'Seq[AnyPath]' to denote a full path and don't need to remake 'tail' etc. ourselves.
 
@@ -84,3 +85,4 @@ object AnyPath {
     }
   }
 }
+***/

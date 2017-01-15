@@ -214,4 +214,5 @@ object StreamsAPI {
   // Failures
   //
   case class NotFound(msg: String) extends RuntimeException(msg)
+  case class Mismatch(msg: String) extends RuntimeException(msg)
 }
