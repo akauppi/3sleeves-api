@@ -46,8 +46,9 @@ object KeyedLogNode {
   }
 
   case class Status(
-
-                   ) extends AnyLogNode.Status
+    created: Tuple2[UID,Instant],
+    `sealed`: Option[Tuple2[UID,Instant]]
+  ) extends AnyLogNode.Status
 
   //--- Actor side ---
 

@@ -1,12 +1,7 @@
 # Todo
 
-- Need to think whether we should make keyed, and keyless streams completely different, in the abstraction
-  - keyed streams (that can be compacted in Kafka) should never lose the 'state' kept in the last keys.
-  - retention period and/or space limits can only be applied to keyless streams, because of above
-  - Config API could then require that any streams given to it are "keyed"
- 
 - `README` needs some pictures to make the page lighter to read
- 
+
 - mention in `README` what we expect of the implementations:
 
 ||persistent|resilient|replicated| 
@@ -19,14 +14,13 @@
 
 Data content is opaque to us, but e.g. Three Sleeves Configuration API will use HOCON.
 
+- Revise docs with the separation to "keyed" and "keyless"
 
 ---
  
-- Akka Streams interface
-  - started
-
 - plain in-memory implementation (Akka Streams)
-
+  - started
+ 
 - Websocket -> Akka Streams converter
 
 - plain node.js implementation (Websocket)

@@ -12,3 +12,7 @@ abstract class AnyLogNode[R](created: Tuple2[UID,Instant]) extends AnyNode(creat
   type Marshaller = R => Array[Byte]
   type Unmarshaller = Array[Byte] => R
 }
+
+object AnyLogNode {
+  abstract class Status extends AnyNode.Status
+}

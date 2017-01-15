@@ -8,7 +8,7 @@ import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import scala.util.{Success, Try}
 import akka.pattern.ask
 import impl.calot.AnyNode.AnyNodeActor
-import impl.calot.tools.AnyPath.BranchPath
+import impl.calot.tools.AnyPath.{BranchPath, LogPath}
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI.{BranchStatus, UID}
 
@@ -23,33 +23,53 @@ import scala.concurrent.Future
 class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) extends AnyNode(created) {
   import BranchNode._
 
-  // Find a log or branch node
+  // Find a branch node
   //
-  // 'gen': If the node does not exist, this is the generator for making it (and the missing levels of path).
-  //
-  // Note: Having 'gen' create also the intermediate branches has the benefit that we don't need to be told the
-  //      'UID' identity.
+  // 'gen': If the node does not exist, this is the generator for making it.
   //
   // Returns:
   //  Success(node) if found or created
-  //  Failure(NotFound) if not found, and not allowed to create
-  //  Failure(Mismatch) if the path contains an interim stage that exists as a log, or
-  //                  if we're looking for dir/log but found the other type
+  //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
+  //  Failure(Mismatch) if the path contains a stage that exists as a log
   //
-  private
-  def find[T <: AnyNode](ap: AnyPath, gen: Option[Function1[String,T]])(implicit as: ActorSystem): Future[Try[T]] = {
+  def find(bp: BranchPath, gen: Option[Function1[String,BranchNode]])(implicit as: ActorSystem): Future[Try[BranchNode]] = {
 
-    (ref ? BranchNodeActor.Find(ap, gen)).map( _.asInstanceOf[Try[T]] )
+    (ref ? BranchNodeActor.Find(bp, gen)).map{
+      case Success(node: BranchNode) => Success(node)
+      case Success(x) => Failure( Mismatch(s"Expected 'BranchNode', got '${x.getClass}'") )
+      case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
+    }
   }
 
-  def find[T <: AnyNode](ap: AnyPath, gen: Function1[String,T])(implicit as: ActorSystem): Future[Try[T]] = {
-    find(ap, Some(gen))
+  // Find a log node (keyless of keyed)
+  //
+  // 'gen': If the node does not exist, this is the generator for making it.
+  //
+  // Returns:
+  //  Success(node) if found or created
+  //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
+  //  Failure(Mismatch) if the path contains a stage that exists as a log, or if the final stage is not of expected type
+  //
+  def find[R, T <: AnyLogNode[R]](lp: LogPath, gen: Option[Function1[String,T]])(implicit as: ActorSystem): Future[Try[T]] = {
+
+    (ref ? BranchNodeActor.Find(lp, gen)).map{
+      case Success(node: T) => Success(node)
+      case Success(x) => Failure( Mismatch(s"Expected '${classOf[T]}', got '${x.getClass}'") )
+      case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
+    }
   }
 
-  def find[T <: AnyNode](ap: AnyPath)(implicit as: ActorSystem): Future[Try[T]] = {
-    find(ap, None)
+  def find[R, T <: AnyLogNode[R]](lp: LogPath, gen: Function1[String,T])(implicit as: ActorSystem): Future[Try[T]] = {
+    find(lp, Some(gen))
   }
 
+  def find[R, T <: AnyLogNode[R]](lp: LogPath)(implicit as: ActorSystem): Future[Try[T]] = {
+    find(lp, None)
+  }
+
+
+  // Get the status of the branch
+  //
   def status: Future[BranchStatus] = {
     (ref ? BranchNodeActor.Status).map {
       case x: Map[String,Any] =>
@@ -64,7 +84,9 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
     }
   }
 
-  def seal: Future[Boolean] = (ref ? BranchNodeActor.Seal).map(_.asInstanceOf[Boolean])
+  def seal: Future[Boolean] = {
+    (ref ? BranchNodeActor.Seal).map(_.asInstanceOf[Boolean])
+  }
 }
 
 object BranchNode {
@@ -72,7 +94,7 @@ object BranchNode {
   // Provides a new path root
   //
   def root(implicit as: ActorSystem): BranchNode = {
-    BranchNode(UID.Root, "/")
+    BranchNode(UID.Root, Instant.now(), "/")
   }
 
   // Note: The 'name' parameter is simply for tracking actors
@@ -81,12 +103,6 @@ object BranchNode {
   def apply(creator: UID, createdAt: Instant, name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): BranchNode = {
     new BranchNode( Tuple2(creator,createdAt), as.actorOf( Props(classOf[BranchNodeActor], initial), name = name) )
   }
-
-  /*** disabled
-  def apply(creator: UID, name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): BranchNode = {
-    BranchNode( Tuple2(creator,Instant.now()), name, initial )
-  }
-  ***/
 
   //--- Actor side ---
   //
@@ -166,7 +182,8 @@ object BranchNode {
 
     // Messages
     //
-    case class Find(rp: AnyPath, gen: Option[Function1[String,AnyNode]])   // -> Try[AnyNode]
+    case class FindBranch(bp: BranchPath, gen: Option[Function1[String,BranchNode]])    // -> Try[BranchNode]
+    case class FindLog(lp: LogPath, gen: Option[Function1[String,AnyLogNode]])          // -> Try[AnyLogNode]
     case object Status          // -> TupleN[...]
     case class Seal(uid: UID)   // -> Try[Boolean]
   }

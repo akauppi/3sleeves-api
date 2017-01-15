@@ -30,7 +30,7 @@ class Calot extends StreamsAPI {
 
     var fresh: Boolean = false
 
-    val fut: Future[Try[BranchNode]] = root.find( bp, (s: String) => {    // create deepest stage
+    val fut: Future[Try[BranchNode]] = root.findBranch( bp, (s: String) => {    // create deepest stage
       fresh = true
       BranchNode(uid,Instant.now(),s)
     })
@@ -41,12 +41,15 @@ class Calot extends StreamsAPI {
   // Create a log
   //
   override
-  def createLog( path: String, keyed: Boolean, uid: UID ): Future[Try[Boolean]] = {
+  def createKeylessLog( path: String, uid: UID ): Future[Try[Boolean]] = ???    // tbd.
+
+  override
+  def createKeyedLog( path: String, uid: UID ): Future[Try[Boolean]] = {
     val lp: LogPath = LogPath.fromAbs(path)   // may throw 'InvalidArgumentException'
 
     var fresh: Boolean = false
 
-    val fut: Future[Try[LogNode]] = root.find( lp, (s: String) => {   // create deepest stage
+    val fut: Future[Try[KeyedLogNode]] = root.find( LogPath(path), (s: String) => {   // create deepest stage
       fresh = true
       val now = Instant.now()
       if (keyed) KeylessLogNode(uid,now,s)

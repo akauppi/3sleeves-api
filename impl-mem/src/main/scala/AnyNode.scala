@@ -31,7 +31,7 @@ object AnyNode {
 
   // Common status fields for all nodes
   //
-  trait Status {
+  abstract class Status {
     val created: Tuple2[UID,Instant]
     val `sealed`: Option[Tuple2[UID,Instant]]
   }

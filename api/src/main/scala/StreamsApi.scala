@@ -27,7 +27,7 @@ trait StreamsAPI {
   //
   def createBranch( path: String, uid: UID ): Future[Try[Boolean]]
 
-  // Create a log
+  // Create a keyless log
   //
   // Returns:
   //    Success(true) if we created the entry (and possibly entries leading to it)
@@ -39,7 +39,17 @@ trait StreamsAPI {
   //
   // path:  Absolute path for a log (does not end in a slash).
   //
-  def createLog( path: String, keyed: Boolean, uid: UID ): Future[Try[Boolean]]
+  def createKeylessLog( path: String, uid: UID ): Future[Try[Boolean]]
+
+  // Create a keyed log
+  //
+  // Like 'createdKeylessLog' (see above).
+  //
+  // Note: The type of log may be important for the back end system, at creation. Keyless ones can support retention
+  //      time/space restrictions, whereas keyed one does not. Keyed one can support compaction (removal of intermediate
+  //      values that don't matter to the end state).
+  //
+  def createKeyedLog( path: String, uid: UID ): Future[Try[Boolean]]
 
   // Open a stream for writing to a keyless log
   //
