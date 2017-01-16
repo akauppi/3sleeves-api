@@ -1,5 +1,6 @@
 package impl.calot
 
+/*** disabled
 import java.time.Instant
 
 import akka.NotUsed
@@ -14,7 +15,6 @@ import akka.pattern.ask
 import scala.util.Failure
 import scala.concurrent.Future
 
-/*** disabled
 /*
 * A node presenting a log stream
 */

@@ -29,13 +29,26 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
   //  Failure(Mismatch) if the path contains a stage that exists as a log
   //
-  def findBranch(names: Seq[String], gen: Option[(String) => BranchNode])(implicit as: ActorSystem): Future[Try[BranchNode]] = {
+  private
+  def findBranch(parts: Seq[String], gen: Option[(String) => BranchNode]): Future[Try[BranchNode]] = {
 
-    (ref ? BranchNodeActor.FindAnyNode(names, gen)).map{
-      case Success(node: BranchNode) => Success(node)
-      case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected 'BranchNode', got '${x.getClass}'") )
-      case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
+    if (parts.isEmpty) {
+      Future( Success(this) )
+    } else {
+      (ref ? BranchNodeActor.FindAnyNode(parts, gen)).map{
+        case Success(node: BranchNode) => Success(node)
+        case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected 'BranchNode', got '${x.getClass}'") )
+        case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
+      }
     }
+  }
+
+  def findBranch(parts: Seq[String], gen: (String) => BranchNode): Future[Try[BranchNode]] = {
+    findBranch(parts, Some(gen))
+  }
+
+  def findBranch(parts: Seq[String]): Future[Try[BranchNode]] = {
+    findBranch(parts, None)
   }
 
   // Find a log node (keyless of keyed)
@@ -47,24 +60,24 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
   //  Failure(Mismatch) if the path contains a stage that exists as a log, or if the final stage is not of expected type
   //
-  def findLog[R, T <: AnyLogNode[R]](names: Seq[String], gen: Option[(String) => T])(implicit as: ActorSystem): Future[Try[T]] = {
+  private
+  def findLog[T <: AnyLogNode](parts: Seq[String], gen: Option[(String) => T]): Future[Try[T]] = {
+    require(parts.nonEmpty)
 
-    (ref ? BranchNodeActor.FindAnyNode(names, gen)).map{
+    (ref ? BranchNodeActor.FindAnyNode(parts, gen)).map{
       case Success(node: T) => Success(node)
       case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected '${classOf[T]}', got '${x.getClass}'") )
       case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
     }
   }
 
-  /*** disabled
-  def find[R, T <: AnyLogNode[R]](lp: LogPath, gen: Function1[String,T])(implicit as: ActorSystem): Future[Try[T]] = {
-    find(lp, Some(gen))
+  def findLog[T <: AnyLogNode](parts: Seq[String], gen: (String) => T): Future[Try[T]] = {
+    findLog(parts, Some(gen))
   }
 
-  def find[R, T <: AnyLogNode[R]](lp: LogPath)(implicit as: ActorSystem): Future[Try[T]] = {
-    find(lp, None)
+  def findLog[T <: AnyLogNode](parts: Seq[String]): Future[Try[T]] = {
+    findLog(parts, None)
   }
-  ***/
 
   // Get the status of the branch
   //

@@ -3,37 +3,51 @@ package impl.calot
 import java.time.Instant
 
 import akka.NotUsed
-import akka.actor.Actor.Receive
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
-import scala.util.{Success, Try}
+import scala.util.Try
 import akka.pattern.ask
-import akka.stream.scaladsl.{Flow, Source}
-import com.typesafe.config.Config
+import akka.stream.{OverflowStrategy, QueueOfferResult}
+import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, RunnableGraph, Sink, Source, SourceQueueWithComplete}
 import impl.calot.AnyNode.AnyNodeActor
-import impl.calot.tools.AnyPath.BranchPath
 import threeSleeves.StreamsAPI
-import threeSleeves.StreamsAPI.{Metadata, UID}
+import threeSleeves.StreamsAPI.{KeyedLogStatus, Metadata, ReadPos, UID}
 
 import scala.util.Failure
-import tools.AnyPath
-
+import scala.collection.mutable
 import scala.concurrent.Future
 
 /*
 * Node for storing keyed data.
 */
-class KeyedLogNode[R] private (created: Tuple2[UID,Instant], val ref: ActorRef) extends AnyLogNode[R](created) {
+class KeyedLogNode private (created: Tuple2[UID,Instant], /*val*/ ref: ActorRef) extends AnyLogNode(created) {
   import KeyedLogNode._
+  import KeyedLogNodeActor.{WriteSink,ReadSource,Status,Seal}
 
-  def writeFlow[T](implicit ev: Marshaller): Flow[Tuple3[T,String,R],T,_] = ???
+  def writeSink(uid: UID): Future[Sink[Tuple2[String,Array[Byte]],_]] = {
 
-  def source(implicit ev: Unmarshaller): Source[Tuple2[String,R],NotUsed] = ???
+    (ref ? WriteSink).map( _.asInstanceOf[Sink[Tuple3[Metadata,String,Array[Byte]]]] ).map( sink => {
 
-  def status: Status = ???
+      val sink2: Sink[Tuple2[String,Array[Byte]],NotUsed] = Flow[Tuple2[String,Array[Byte]]]
+        .map(t => {
+          val meta: Metadata = Metadata(uid,Instant.now())
+          Tuple3(meta,t._1,t._2)
+        })
+        .to(sink)
+
+      sink2
+    } )
+  }
+
+  def readSource: Future[Try[Tuple2[Long,Source[Tuple4[ReadPos,Metadata,String,Array[Byte]],NotUsed]]]] = {
+
+    (ref ? ReadSource).map( _.asInstanceOf[Try[Tuple2[Long,Source[Tuple4[ReadPos,Metadata,String,Array[Byte]],NotUsed]]]] )
+  }
+
+  def status: Future[KeyedLogStatus] = (ref ? Status).map(_.asInstanceOf[KeyedLogStatus])
 
   override
-  def seal(): Future[Boolean] = ???
+  def seal(uid: UID): Future[Try[Boolean]] = (ref ? Seal(uid)).map(_.asInstanceOf[Try[Boolean]])
 }
 
 object KeyedLogNode {
@@ -41,7 +55,7 @@ object KeyedLogNode {
   // Note: The 'name' parameter is simply for tracking actors
   //
   //private
-  def apply[R](creator: UID, createdAt: Instant, name: String)(implicit as: ActorSystem): KeyedLogNode[R] = {
+  def apply(creator: UID, createdAt: Instant, name: String)(implicit as: ActorSystem): KeyedLogNode = {
     new KeyedLogNode( Tuple2(creator,createdAt), as.actorOf( Props(classOf[KeyedLogNodeActor]), name = name) )
   }
 
@@ -58,21 +72,68 @@ object KeyedLogNode {
   * - stores the data
   */
   private
-  class KeyedLogNodeActor private ( creator: UID ) extends Actor with AnyNodeActor {
+  class KeyedLogNodeActor private ( created: Tuple2[UID,Instant] ) extends Actor with AnyNodeActor {
     import KeyedLogNodeActor._
 
+    // Keep a collection of historic values, and separate source for informing on new ones.
+    //
+    // Using a map, we are essentially compacting the data, automatically, only keeping the latest value.
+    //
     private
-    var data: List[Tuple3[Metadata,String,Array[Byte]]] = Map.empty
+    val data: mutable.Map[String,Tuple2[Metadata,Array[Byte]]] = mutable.Map.empty
+
+    private type X = Tuple3[Metadata,String,Array[Byte]]
+
+    // Underlying sink and source that are spread to others via 'MergeHub' and 'BroadcastHub'
+    //
+    private
+    val (jointSink: Sink[X,_], jointSource: Source[X,_], fComplete: Function0[Unit]) = {
+
+      val source: Source[X,SourceQueueWithComplete[X]] = Source.queue[X](10 /*buffer size*/, OverflowStrategy.fail)
+
+      val queue: SourceQueueWithComplete[X] = source.toMat(Sink.ignore)(Keep.left).run()    // tbd. is 'Sink.ignore' okay?
+
+      val sink: Sink[X,_] = Sink.foreach( x => {
+        val fut: Future[QueueOfferResult] = queue.offer(x)      // offer to current subscribers (if any)
+
+        fut.onComplete {
+          case Failure(ex) =>
+            println( s"PROBLEM: $ex" )    // tbd. use logger (if this happens we hope the stream also fails)
+        }
+
+        //disabled
+        // Note: another approach could be to pipe the future value to us as an actor
+        //fut pipeTo this.self    // our 'ActorRef'
+
+        data(x._2) = Tuple2(x._1,x._3)
+      } )
+
+      (sink,source, () => queue.complete())
+    }
+
+    private
+    val rg: RunnableGraph[Sink[X,_]] = MergeHub.source[X].to(jointSink)   // using default 'perProducerBufferSize' (16)
 
     def receive: Receive = {
-      //case Xxx =>
 
-      // tbd. writeFlow, read, ...
+      case WriteSink =>
+        val tmp: Sink[X,_] = rg.run()   // local sink
+        tmp
+
+      case ReadSource =>
+        val rg: RunnableGraph[Source[X,NotUsed]] =
+          jointSource.toMat(BroadcastHub.sink(bufferSize = 256))(Keep.right)
+
+        val tmp: Source[X,_] = rg.run()
+        Tuple2(data.size, tmp)
+
+      case KeyedLogNodeActor.Status =>
+        sender ! StreamsAPI.KeyedLogStatus(created, `sealed`)
 
       // Sealing a log aborts any ongoing writes and closes any reads
       //
       case Seal(uid) =>
-        // tbd. abort any ongoing writes and close any reads
+        fComplete()   // abort writes and complete reads
 
         super.seal(uid)
     }
@@ -83,6 +144,9 @@ object KeyedLogNode {
 
     // Messages
     //
+    case object WriteSink       // -> Try[Sink[Tuple3[Metadata,String,Array[Byte]]]]
+    case object ReadSource      // -> Try[Tuple2[Long,Source[Tuple4[ReadPos,Metadata,String,Array[Byte]],NotUsed]]]
+    case object Status          // -> KeyedLogStatus
     case class Seal(uid: UID)   // -> Try[Boolean]
   }
 }

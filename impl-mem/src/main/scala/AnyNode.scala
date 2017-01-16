@@ -9,6 +9,8 @@ import threeSleeves.StreamsAPI.UID
 import scala.concurrent.Future
 import akka.pattern.ask
 
+import scala.util.Try
+
 /*
 * Common base class for '..LogNode' and 'BranchNode'.
 *
@@ -24,7 +26,7 @@ import akka.pattern.ask
 abstract class AnyNode (val created: Tuple2[UID,Instant]) {
   import AnyNode._
 
-  def seal: Future[Boolean] //disabled: = (ref ? AnyNodeActor.Seal).map(_.asInstanceOf[Boolean])
+  def seal(uid: UID): Future[Try[Boolean]]
 }
 
 object AnyNode {
