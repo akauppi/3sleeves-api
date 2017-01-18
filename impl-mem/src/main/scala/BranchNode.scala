@@ -2,23 +2,37 @@ package impl.calot
 
 import java.time.Instant
 
+import akka.NotUsed
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 
 import scala.util.{Success, Try}
 import akka.pattern.ask
+import akka.stream.{OverflowStrategy, QueueOfferResult}
+import akka.stream.scaladsl.{BroadcastHub, Keep, RunnableGraph, Sink, Source, SourceQueueWithComplete}
+import akka.util.Timeout
 import impl.calot.AnyNode.AnyNodeActor
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI.{BranchStatus, UID}
 
 import scala.util.Failure
-
 import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.reflect.ClassTag
+import scala.reflect.runtime.universe.{TypeTag, typeOf}
 
 /*
 * Node for a certain path (akin to directory).
 */
-class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) extends AnyNode(created) {
+class BranchNode private (protected val created: Tuple2[UID,Instant], protected val ref: ActorRef) extends AnyNode {
   import BranchNode._
+  import BranchNodeActor._
+  import scala.concurrent.ExecutionContext.Implicits.global
+
+  override
+  type Status = StreamsAPI.BranchStatus
+
+  private
+  implicit val askTimeout: Timeout = 1 seconds   // tbd. from config or some global for all ask patterns
 
   // Find a branch node
   //
@@ -33,7 +47,7 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   def findBranch(parts: Seq[String], gen: Option[(String) => BranchNode]): Future[Try[BranchNode]] = {
 
     if (parts.isEmpty) {
-      Future( Success(this) )
+      Future.successful( Success(this) )
     } else {
       (ref ? BranchNodeActor.FindAnyNode(parts, gen)).map{
         case Success(node: BranchNode) => Success(node)
@@ -61,42 +75,28 @@ class BranchNode private (created: Tuple2[UID,Instant], val ref: ActorRef) exten
   //  Failure(Mismatch) if the path contains a stage that exists as a log, or if the final stage is not of expected type
   //
   private
-  def findLog[T <: AnyLogNode](parts: Seq[String], gen: Option[(String) => T]): Future[Try[T]] = {
+  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String], gen: Option[(String) => T]): Future[Try[T]] = {
     require(parts.nonEmpty)
 
     (ref ? BranchNodeActor.FindAnyNode(parts, gen)).map{
       case Success(node: T) => Success(node)
-      case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected '${classOf[T]}', got '${x.getClass}'") )
+      case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected '${typeOf[T]}', got '${x.getClass}'") )
       case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
     }
   }
 
-  def findLog[T <: AnyLogNode](parts: Seq[String], gen: (String) => T): Future[Try[T]] = {
+  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String], gen: (String) => T): Future[Try[T]] = {
     findLog(parts, Some(gen))
   }
 
-  def findLog[T <: AnyLogNode](parts: Seq[String]): Future[Try[T]] = {
+  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String]): Future[Try[T]] = {
     findLog(parts, None)
   }
 
-  // Get the status of the branch
+  // tbd. Is there a way in Akka Streams that we can just return a 'Source' right away?
   //
-  def status: Future[BranchStatus] = {
-    (ref ? BranchNodeActor.Status).map {
-      case x: Map[String,Any] =>
-        val (branches: Seq[String], logs: Seq[String]) = x.get("names").asInstanceOf[Iterable[String]].partition( _.endsWith("/") )
-
-        BranchStatus(
-          created = created,
-          `sealed` = x.get("sealed").asInstanceOf[Option[Tuple2[UID,Instant]]],
-          logs = logs.toSet,
-          branches = branches.toSet
-        )
-    }
-  }
-
-  def seal: Future[Boolean] = {
-    (ref ? BranchNodeActor.Seal).map(_.asInstanceOf[Boolean])
+  def watch: Future[Source[String,NotUsed]] = {
+    (ref ? Watch).map( _.asInstanceOf[Source[String,NotUsed]] )
   }
 }
 
@@ -131,7 +131,19 @@ object BranchNode {
     private
     var children: Map[String,AnyNode] = initial
 
-    def receive: Receive = {
+    // Underlying source for new entries
+    //
+    private
+    val (jointSource: Source[String,_], queue: SourceQueueWithComplete[String]) = {
+
+      val source: Source[String,SourceQueueWithComplete[String]] = Source.queue[String](10 /*buffer size*/, OverflowStrategy.fail)
+      val queue: SourceQueueWithComplete[String] = source.toMat(Sink.ignore)(Keep.left).run()    // tbd. is 'Sink.ignore' okay?
+
+      (source,queue)
+    }
+
+    override
+    def receive: Receive = PartialFunction[Any,Unit] {
       // Find a subbranch, or log node, or create one
       //
       case FindAnyNode(names,gen) =>
@@ -154,45 +166,63 @@ object BranchNode {
           case None if gen.isEmpty =>
             Failure( StreamsAPI.NotFound(s"No such ${if (names.tail.nonEmpty) "branch" else "log"} and not going to create one: $name") )
 
-          case None =>    // create and attach
+          case None if !isSealed =>    // create and attach
             val seed: AnyNode = gen.get.apply(names.last)
-            extend(names,seed)
+            children += extend(names,seed)
+            queue.offer(names.head)   // entry to the watch source
             Success(seed)
+
+          case None =>
+            Failure( StreamsAPI.Sealed(s"Cannot create an entry in sealed branch: $name") )
         }
 
         if (!forwarded) {
           sender ! res
         }
 
-      // Status
-      //
-      case Status =>
-        val names: Iterable[String] = children.map {
-          case (name,_: BranchNode) => name + "/"
-          case (name,_) => name
-        }
+      case Watch =>
+        val rg: RunnableGraph[Source[String,NotUsed]] = jointSource.toMat(BroadcastHub.sink(bufferSize = 256))(Keep.right)
 
-        val (b,a) = children.partition(_._2.isInstanceOf[BranchNode])
+        val tmp: Source[String,NotUsed] = rg.run()
+        tmp
 
-        sender ! StreamsAPI.BranchStatus(
-          created = created,
-          `sealed` = `sealed`,
-          logs = a.keys.toSet,
-          branches = b.keys.toSet
-        )
+    } orElse super.receive
 
-      // Sealing a branch means no futher logs are allowed to be created (in this stage). Nothing more.
-      //
-      case Seal(uid) =>
-        super.seal(uid)
+    // Called by 'AnyNode'
+    //
+    override
+    def status: BranchStatus = {
+      val names: Iterable[String] = children.map {
+        case (name,_: BranchNode) => name + "/"
+        case (name,_) => name
+      }
 
+      val (b,a) = children.partition(_._2.isInstanceOf[BranchNode])
+
+      StreamsAPI.BranchStatus(
+        created = created,
+        `sealed` = `sealed`,
+        logs = a.keys.toSet,
+        branches = b.keys.toSet
+      )
     }
+
+    // Called by 'AnyNode'
+    //
+    override
+    def onSeal(): Unit = {
+      queue.complete()    // close the watch streams
+    }
+  }
+
+  private
+  object BranchNodeActor {
 
     /*
     * Extend the branch under 'names'. The deepest node is given as 'seed'.
     */
     private
-    def extend(names: Seq[String], seed: AnyNode): Unit = {
+    def extend(names: Seq[String], seed: AnyNode)(implicit as: ActorSystem): Tuple2[String,AnyNode] = {
       val seedName = names.last
       val tmp: Seq[String] = names.reverse.drop(1)
 
@@ -204,17 +234,14 @@ object BranchNode {
         Tuple2( BranchNode(creator, createdAt, aName, Map(bName -> bNode)), aName )
       }}
 
-      children += firstName -> first
+      firstName -> first
     }
-  }
-
-  private
-  object BranchNodeActor {
 
     // Messages
     //
-    case class FindAnyNode(names: Seq[String], gen: Option[Function1[String,AnyNode]])         // -> Try[AnyNode]
-    case object Status          // -> BranchStatus
-    case class Seal(uid: UID)   // -> Try[Boolean]
+    case class FindAnyNode(names: Seq[String], gen: Option[Function1[String,AnyNode]])    // -> Try[AnyNode]
+    case object Watch             // Source[String,NotUsed]
+    //case object Status          // -> BranchStatus
+    //case class Seal(uid: UID)   // -> Try[Boolean]
   }
 }

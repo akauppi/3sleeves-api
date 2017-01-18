@@ -3,6 +3,7 @@ package impl.calot
 import java.time.Instant
 
 import akka.NotUsed
+import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI._
@@ -16,11 +17,13 @@ import scala.util.{Failure, Try}
 *
 * Note: There's no use for such except for as "customer 0" for Three Sleeves API.
 */
-class Calot extends StreamsAPI {
+class Calot(implicit as: ActorSystem) extends StreamsAPI {
   import Calot._
 
   private
   val root = BranchNode.root
+
+  import as.dispatcher    // ExecutionContext
 
   // Create a branch
   //
@@ -98,7 +101,9 @@ class Calot extends StreamsAPI {
           x
       }
 
-      val (prefix: Seq[Tuple4[ReadPos,Metadata,String,Array[Byte]]], tailSource: Source[Tuple4[ReadPos,Metadata,String,Array[Byte]],NotUsed]) = source.prefixAndTail(border.toInt)
+      type X = Tuple4[ReadPos,Metadata,String,Array[Byte]]
+
+      val (prefix: Seq[X], tailSource: Source[X,NotUsed]) = source.prefixAndTail(border.toInt)
 
       val init: Map[String,R] = {
         prefix.map( Function.tupled( (_:ReadPos, _:Metadata, key: String, v: Array[Byte]) => {
@@ -107,7 +112,7 @@ class Calot extends StreamsAPI {
       }
 
       Tuple2(init,tailSource)
-    })
+    }
   }
 
   override

@@ -1,24 +1,25 @@
 package threeSleeves
 
-import akka.stream.scaladsl.{Source}
+import akka.stream.scaladsl.Source
 import com.typesafe.config.{Config, ConfigValue}
 import threeSleeves.StreamsAPI.UID
 
+import scala.concurrent.Future
 import scala.util.Try
 
 /*
 * Config API utilizes one or more streams, to provide a Typesafe Config -like configuration experience, but dynamically.
 */
-object ConfigAPI {
+object ConfigAPI { self: StreamsAPI =>
 
   // Open a config stream
   //
   // Returns:
-  //    Success(config stream) The first batch contains the current configuration. Further entries carry changes to it.
-  //    Failure(Unauthorized)
+  //    Success(source) The first batch contains the initial configuration (existing state on top of 'base').
+  //                    Further entries carry changes to it.
   //    Failure(NotFound)
   //
-  def open( base: Config, keyedLogPath: String ): Try[Tuple2[Config,Source[Map[String,ConfigValue],_]]] = {
+  def open( base: Config, keyedLogPath: String ): Future[Try[Source[Map[String,ConfigValue],_]]] = {
 
     ???
   }

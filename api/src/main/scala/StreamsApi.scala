@@ -164,9 +164,9 @@ object StreamsAPI {
   case class ReadPos private (v: Long) extends AnyVal
 
   object ReadPos {
-    //val Beginning = new ReadPos(0)
-    //val EarliestAvailable = new ReadPos(-2L)
+    val Beginning = new ReadPos(0)
     val NextAvailable = new ReadPos(-1L)
+    //val EarliestAvailable = new ReadPos(-2L)
 
     def apply(v: Long, dummy: Boolean = false): ReadPos = {
       require(v >= 0, s"'ReadPos' offsets not >= 0: $v")    // may throw 'InvalidArgumentException'
@@ -194,6 +194,10 @@ object StreamsAPI {
     branches: Set[String]
   ) extends AnyStatus
 
+  sealed trait AnyLogStatus extends AnyStatus {
+    // tbd. placeholder for fields common to keyed and keyless logs
+  }
+
   case class KeylessLogStatus(
     created: Tuple2[UID,Instant],
     `sealed`: Option[Tuple2[UID,Instant]],
@@ -201,7 +205,7 @@ object StreamsAPI {
     nextPos: ReadPos,
     retentionTime: Option[Period],
     retentionSpace: Option[Long]
-  ) extends AnyStatus {
+  ) extends AnyLogStatus {
 
     assert(oldestPos.v <= nextPos.v)
   }
@@ -209,10 +213,11 @@ object StreamsAPI {
   case class KeyedLogStatus(
     created: Tuple2[UID,Instant],
     `sealed`: Option[Tuple2[UID,Instant]]
-  ) extends AnyStatus
+  ) extends AnyLogStatus
 
   // Failures
   //
   case class NotFound(msg: String) extends RuntimeException(msg)
   case class Mismatch(msg: String) extends RuntimeException(msg)
+  case class Sealed(msg: String) extends RuntimeException(msg)
 }
