@@ -7,13 +7,13 @@ import akka.actor.{Actor, ActorRef}
 
 import scala.util.Try
 import akka.pattern.ask
-import akka.stream.{OverflowStrategy, QueueOfferResult}
+import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy, QueueOfferResult}
 import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, RunnableGraph, Sink, Source, SourceQueueWithComplete}
 import impl.calot.AnyNode.AnyNodeActor
 import threeSleeves.StreamsAPI.{Metadata, ReadPos, UID}
 
 import scala.util.Failure
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 /*
 * Common features for 'KeylessLogNode' and 'KeyedLogNode'. We store both as a list of events, though in actual
@@ -28,11 +28,14 @@ abstract class AnyLogNode[K] extends AnyNode {
   import AnyLogNode._
   import AnyLogNodeActor._
 
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   private
   type T = Tuple2[K,Array[Byte]]
 
-  def writeSink(uid: UID): Future[Sink[T,_]] = {
-    (ref ? WriteSink).map( _.asInstanceOf[Sink[Tuple2[Metadata,T]]] ).map( sink => {
+  def writeSink(uid: UID): Future[Sink[T,NotUsed]] = {
+
+    (ref ? WriteSink).map( _.asInstanceOf[Sink[Tuple2[Metadata,T],_]] ).map( sink => {
 
       val tmp: Sink[T,NotUsed] = Flow[T]
         .map(t => Tuple2(Metadata(uid,Instant.now()),t))
@@ -42,8 +45,8 @@ abstract class AnyLogNode[K] extends AnyNode {
     } )
   }
 
-  def readNextOffsetAndSource: Future[Try[Tuple2[Long,Source[Tuple3[ReadPos,Metadata,T],NotUsed]]]] = {
-    (ref ? ReadNextOffsetAndSource).map( _.asInstanceOf[Try[Tuple2[Long,Source[Tuple3[ReadPos,Metadata,T],NotUsed]]]] )
+  def readNextOffsetAndSource: Future[Try[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]]] = {
+    (ref ? ReadNextOffsetAndSource).map( _.asInstanceOf[Try[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]]] )
   }
 }
 
@@ -57,13 +60,6 @@ object AnyLogNode {
   }
   ***/
 
-  /*** disabled
-  class Status(
-    val created: Tuple2[UID,Instant],
-    val `sealed`: Option[Tuple2[UID,Instant]]
-  ) extends AnyNode.Status
-  ***/
-
   //--- Actor side ---
 
   /*
@@ -72,11 +68,13 @@ object AnyLogNode {
   trait AnyLogNodeActor[K] extends AnyNodeActor { self: Actor =>
     import AnyLogNodeActor._
 
+    import scala.concurrent.ExecutionContext.Implicits.global
+
     private type S = Tuple3[Metadata,K,Array[Byte]]
 
     // Keep a collection of historic values, and separate source for informing on new ones.
     //
-    private
+    protected
     var data: List[S] = List.empty   // Note: latest value as head; prepending is fast for immutable lists
 
     // Underlying sink and source that are spread to others via 'MergeHub' and 'BroadcastHub'
@@ -113,14 +111,21 @@ object AnyLogNode {
 
       case WriteSink =>
         val tmp: Sink[S,_] = rg.run()   // local sink
-        tmp
+        sender ! tmp
 
       case ReadNextOffsetAndSource =>
-        val rg: RunnableGraph[Source[S,NotUsed]] =
+        val rg: RunnableGraph[Source[S,_]] =
           jointSource.toMat(BroadcastHub.sink(bufferSize = 256))(Keep.right)
 
-        val tmp: Source[S,_] = rg.run()
-        Tuple2(data.size, tmp)
+        val liveSource: Source[S,_] = rg.run()
+
+        val tmp: Source[Tuple2[ReadPos,S],_] = Source(data.reverse)     // values stored so far
+          .concat(liveSource)
+          .zipWithIndex
+          .map( Function.tupled( (entry:S, i:Long) => Tuple2(ReadPos(i), entry) ))
+          //.filter( _._1.v >= at.v )
+
+        sender ! Tuple2(data.size, tmp)
     }.orElse( super.receive )
 
     // Called by 'AnyNode'
@@ -136,8 +141,8 @@ object AnyLogNode {
 
     // Messages
     //
-    case object WriteSink       // -> Try[Sink[Tuple2[Metadata,T]]]
-    case object ReadNextOffsetAndSource      // -> Try[Tuple2[Long,Source[Tuple3[ReadPos,Metadata,T],NotUsed]]]
+    case object WriteSink       // -> Try[Sink[Tuple3[Metadata,K,V]]]
+    case object ReadNextOffsetAndSource      // -> Try[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,V]],NotUsed]]]
     //case object Status          // -> AnyLogNode.Status
     //case class Seal(uid: UID)   // -> Boolean
   }

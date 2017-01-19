@@ -168,7 +168,7 @@ object BranchNode {
 
           case None if !isSealed =>    // create and attach
             val seed: AnyNode = gen.get.apply(names.last)
-            children += extend(names,seed)
+            children += extend(names,seed)(context.system)
             queue.offer(names.head)   // entry to the watch source
             Success(seed)
 
@@ -184,7 +184,7 @@ object BranchNode {
         val rg: RunnableGraph[Source[String,NotUsed]] = jointSource.toMat(BroadcastHub.sink(bufferSize = 256))(Keep.right)
 
         val tmp: Source[String,NotUsed] = rg.run()
-        tmp
+        sender ! tmp
 
     } orElse super.receive
 

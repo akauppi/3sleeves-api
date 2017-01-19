@@ -6,8 +6,12 @@ import akka.actor.{Actor, ActorRef}
 import impl.calot.AnyNode.AnyNodeActor
 import threeSleeves.StreamsAPI.UID
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import akka.pattern.ask
+import akka.stream.{ActorMaterializer, Materializer}
+import akka.util.Timeout
+
+import scala.concurrent.duration._
 
 /*
 * Common base class for '..LogNode' and 'BranchNode'.
@@ -19,9 +23,12 @@ import akka.pattern.ask
 *     confusing at first, but works and lets us model the different levels of commonalities.
 */
 abstract class AnyNode {
-  protected val created: Tuple2[UID,Instant]
+  val created: Tuple2[UID,Instant]    // used by 'BranchNodeActor' (needs to be public)
   protected val ref: ActorRef
   protected type Status <: AnyNode.Status
+
+  implicit val askTimeout: Timeout = 1 second
+  import scala.concurrent.ExecutionContext.Implicits.global
 
   def status: Future[Status] = (ref ? AnyNodeActor.Status).map(_.asInstanceOf[Status])
 
@@ -43,6 +50,10 @@ object AnyNode {
   //
   trait AnyNodeActor { self: Actor =>
     import AnyNodeActor._
+
+    implicit val mat: Materializer = ActorMaterializer()    // for derived classes
+    //implicit val ec: ExecutionContext = context.dispatcher
+    //import scala.concurrent.ExecutionContext.Implicits.global
 
     protected
     var `sealed`: Option[Tuple2[UID,Instant]] = None
@@ -73,7 +84,7 @@ object AnyNode {
           onSeal()
           `sealed` = Some(Tuple2(uid,Instant.now()))
         }
-        fresh
+        sender ! fresh
     }
   }
 

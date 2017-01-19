@@ -64,34 +64,41 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
   def writeKeyless[R: Marshaller,Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Seq[R]],Tag,_]]] = ???
 
   override
-  def writeKeyed[R: Marshaller,Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Map[String,R]],Tag,_]]] = {
+  def writeKeyed[R: Marshaller,Tag]( path: String, uid: UID ): Future[Flow[Tuple2[Tag,Tuple2[String,R]],Tag,_]] = {
 
     val mar: R => Array[Byte] = implicitly[Marshaller[R]]
 
-    for( node <- logNode(path);
-      sink: Sink[Tuple2[String,Array[Byte]],_] <- node.writeSink(uid)
+    val tmp: Future[Flow[Tuple2[Tag,Tuple2[String,R]],Tag,_]] = for( node: KeyedLogNode <- logNode[KeyedLogNode](path);
+      sink: Sink[Tuple2[String,Array[Byte]],NotUsed] <- node.writeSink(uid)
     ) yield {
-      val sink2: Sink[Tuple3[Tag,String,R],NotUsed] = Flow[Tuple3[Tag,String,R]]
-        .map( (t: Tuple3[Tag,String,R]) => Tuple2(t._2, mar(t._3)) )
+      ???
+      /***
+      val sink2: Sink[Tuple2[Tag,Tuple2[String,R]],NotUsed] = Flow[Tuple2[Tag,Tuple2[String,R]]]
+        .map( (t: Tuple2[Tag,Tuple2[String,R]]) => Tuple2(t._2._1, mar(t._2._2)) )
         .to(sink)
 
-      Flow.fromSinkAndSource(sink2,Source.empty)
+      Flow.fromSinkAndSource(sink2,Source.empty[Tag])
+        ***/
     }
+    tmp
   }
 
   override
   def readKeyless[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Source[Tuple3[ReadPos,Metadata,R],_]]] = ???
 
   override
-  def readKeyed[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,R],Source[Tuple3[ReadPos,Metadata,Map[String,R]],_]]]] = {
+  def readKeyed[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,Tuple2[Metadata,R]],Source[Tuple3[ReadPos,Metadata,Map[String,R]],_]]]] = {
 
     val unmar = implicitly[Unmarshaller[R]]
 
-    // For keyed stream, we always read from beginning. Then place values < 'at' into an initial map, and provide the stream from the rest
+    type X = Tuple3[Metadata,String,Array[Byte]]
+    type ReadPos_X = Tuple2[ReadPos,X]
+
+    // Read from the beginning. Place values < 'at' into an initial map, and provide a stream from the rest.
     //
-    for( node <- logNode[KeyedLogNode](path);
-         tryNexPosAndSource: Try[Tuple2[Long,Source[Tuple4[ReadPos,Metadata,String,Array[Byte]],NotUsed]]] <- node.readSource(ReadPos.Beginning);
-         (nextPos,source) <- tryNexPosAndSource
+    for( node: KeyedLogNode <- logNode[KeyedLogNode](path);
+         tryNextPosAndSource: Try[Tuple2[Long,Source[ReadPos_X,NotUsed]]] <- node.readNextOffsetAndSource;
+         (nextPos: Long, source: Source[ReadPos_X,NotUsed]) <- tryNextPosAndSource
     ) yield {
 
       val border: Long = at match {
@@ -101,13 +108,11 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
           x
       }
 
-      type X = Tuple4[ReadPos,Metadata,String,Array[Byte]]
+      val (prefix: Seq[ReadPos_X], tailSource: Source[ReadPos_X,NotUsed]) = source.prefixAndTail(border.toInt)
 
-      val (prefix: Seq[X], tailSource: Source[X,NotUsed]) = source.prefixAndTail(border.toInt)
-
-      val init: Map[String,R] = {
-        prefix.map( Function.tupled( (_:ReadPos, _:Metadata, key: String, v: Array[Byte]) => {
-          Tuple2( key, unmar(v) )
+      val init: Map[String,Tuple2[Metadata,R]] = {
+        prefix.map(_._2).map( Function.tupled( (meta:Metadata, key: String, v: Array[Byte]) => {
+          Tuple2( key, Tuple2(meta,unmar(v)) )
         })).toMap
       }
 
@@ -154,7 +159,7 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
   }
 
   private
-  def logNode[T <: AnyLogNode](path: String): Future[T] = {
+  def logNode[T <: AnyLogNode[_]](path: String): Future[T] = {
     root.findLog[T](parseLogPath(path))
   }
 }
