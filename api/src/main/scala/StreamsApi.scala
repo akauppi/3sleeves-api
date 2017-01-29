@@ -75,6 +75,7 @@ trait StreamsAPI {
   //
   final
   def writeKeyless[R: Marshaller,Tag](path: String, uid: UID): Future[Flow[Tuple2[Tag,R],Tag,NotUsed]] = {
+    import scala.concurrent.ExecutionContext.Implicits.global
 
     val fut: Future[Flow[Tuple2[Tag,Seq[R]],Tag,NotUsed]] = writeKeylessBatched[R,Tag](path,uid)
 
@@ -105,6 +106,7 @@ trait StreamsAPI {
   //
   final
   def writeKeyed[R: Marshaller,Tag](path: String, uid: UID): Future[Flow[Tuple2[Tag,Tuple2[String,R]],Tag,NotUsed]] = {
+    import scala.concurrent.ExecutionContext.Implicits.global
 
     val fut: Future[Flow[Tuple2[Tag,Seq[Tuple2[String,R]]],Tag,NotUsed]] = writeKeyedBatched[R,Tag](path,uid)
 

@@ -10,6 +10,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
+import threeSleeves.StreamsAPI
 
 import scala.concurrent.duration._
 
@@ -25,7 +26,7 @@ import scala.concurrent.duration._
 abstract class AnyNode {
   val created: Tuple2[UID,Instant]    // used by 'BranchNodeActor' (needs to be public)
   protected val ref: ActorRef
-  protected type Status <: AnyNode.Status
+  protected type Status <: StreamsAPI.AnyStatus
 
   implicit val askTimeout: Timeout = 1 second
   import scala.concurrent.ExecutionContext.Implicits.global

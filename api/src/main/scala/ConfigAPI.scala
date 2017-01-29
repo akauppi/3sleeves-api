@@ -19,7 +19,7 @@ object ConfigAPI { self: StreamsAPI =>
   //                    Further entries carry changes to it.
   //    Failure(NotFound)
   //
-  def open( base: Config, keyedLogPath: String ): Future[Try[Source[Map[String,ConfigValue],_]]] = {
+  def open( base: Config, keyedLogPath: String ): Future[Source[Map[String,ConfigValue],_]] = {
 
     ???
   }

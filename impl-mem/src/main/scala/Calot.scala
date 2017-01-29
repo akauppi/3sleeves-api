@@ -5,11 +5,13 @@ import java.time.Instant
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Flow, Sink, Source}
+import com.sun.tools.javac.code.TypeTag
 import threeSleeves.StreamsAPI
 import threeSleeves.StreamsAPI._
 
-import scala.collection.mutable
+import scala.collection.immutable
 import scala.concurrent.Future
+import scala.reflect.ClassTag
 import scala.util.{Failure, Try}
 
 /*
@@ -28,40 +30,40 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
   // Create a branch
   //
   override
-  def createBranch( path: String, uid: UID ): Future[Try[Boolean]] = {
+  def createBranch( path: String, uid: UID ): Future[Boolean] = {
     val parts: Seq[String] = parseBranchPath(path)    // may throw 'InvalidArgumentException'
 
     var fresh: Boolean = false
 
-    val fut: Future[Try[BranchNode]] = root.findBranch( parts, (s: String) => {    // create deepest stage
+    val fut: Future[BranchNode] = root.findBranch( parts, (s: String) => {    // create deepest stage
       fresh = true
       BranchNode(uid,Instant.now(),s)
     })
 
-    fut.map(_.map(_ => fresh))
+    fut.map(_ => fresh)
   }
 
   // Create a log
   //
   override
-  def createKeylessLog( path: String, uid: UID ): Future[Try[Boolean]] = ???    // tbd. once keyed works
+  def createKeylessLog( path: String, uid: UID ): Future[Boolean] = ???    // tbd. once keyed works
 
   override
-  def createKeyedLog( path: String, uid: UID ): Future[Try[Boolean]] = {
+  def createKeyedLog( path: String, uid: UID ): Future[Boolean] = {
     val parts: Seq[String] = parseLogPath(path)    // may throw 'InvalidArgumentException'
 
     var fresh: Boolean = false
 
-    val fut: Future[Try[KeyedLogNode]] = root.findLog( parts, (s: String) => {   // create deepest stage
+    val fut: Future[KeyedLogNode] = root.findLog( parts, (s: String) => {   // create deepest stage
       fresh = true
       KeyedLogNode(uid,Instant.now(),s)
     } )
 
-    fut.map(_.map(_ => fresh))
+    fut.map(_ => fresh)
   }
 
   override
-  def writeKeyless[R: Marshaller,Tag]( path: String, uid: UID ): Future[Try[Flow[Tuple2[Tag,Seq[R]],Tag,_]]] = ???
+  def writeKeyless[R: Marshaller,Tag]( path: String, uid: UID ): Future[Flow[Tuple2[Tag,Seq[R]],Tag,_]] = ???
 
   override
   def writeKeyed[R: Marshaller,Tag]( path: String, uid: UID ): Future[Flow[Tuple2[Tag,Tuple2[String,R]],Tag,_]] = {
@@ -84,22 +86,32 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
   }
 
   override
-  def readKeyless[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Source[Tuple3[ReadPos,Metadata,R],_]]] = ???
+  def readKeyless[R: Unmarshaller](path: String, at: ReadPos): Future[Source[Tuple3[ReadPos,Metadata,R],_]] = ???
 
   override
-  def readKeyed[R: Unmarshaller]( path: String, at: ReadPos ): Future[Try[Tuple2[Map[String,Tuple2[Metadata,R]],Source[Tuple3[ReadPos,Metadata,Map[String,R]],_]]]] = {
+  def readKeyed[R: Unmarshaller](path: String, rewind: Boolean = false): Future[
+    Try[
+      Tuple2[
+        Map[String,Tuple2[Metadata,R]],
+        Source[Tuple3[ReadPos,Metadata,Map[String,R]],NotUsed]
+      ]
+    ]
+  ] = {
 
     val unmar = implicitly[Unmarshaller[R]]
 
-    type X = Tuple3[Metadata,String,Array[Byte]]
+    type X = Tuple2[Metadata,Seq[Tuple2[String,Array[Byte]]]]
     type ReadPos_X = Tuple2[ReadPos,X]
 
     // Read from the beginning. Place values < 'at' into an initial map, and provide a stream from the rest.
     //
+    // Scala note: cannot mix 'Future' and 'Try' for comprehensions; need to provide them separately.
+    //
     for( node: KeyedLogNode <- logNode[KeyedLogNode](path);
-         tryNextPosAndSource: Try[Tuple2[Long,Source[ReadPos_X,NotUsed]]] <- node.readNextOffsetAndSource;
-         (nextPos: Long, source: Source[ReadPos_X,NotUsed]) <- tryNextPosAndSource
+         (nextPos: Long, sourceByteArray: Source[Tuple2[ReadPos,Tuple3[Metadata,String,Array[Byte]]],NotUsed]) <- node.readNextOffsetAndSource
     ) yield {
+
+      val source: Source[Tuple3[Metadata,String,Array[Byte]],NotUsed]
 
       val border: Long = at match {
         case ReadPos.NextAvailable =>
@@ -108,7 +120,11 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
           x
       }
 
-      val (prefix: Seq[ReadPos_X], tailSource: Source[ReadPos_X,NotUsed]) = source.prefixAndTail(border.toInt)
+      // BUG: WHY does this not compile?
+      //
+      val tmp: Tuple2[immutable.Seq[ReadPos_X], Source[ReadPos_X,NotUsed]] = ??? //source.prefixAndTail[ReadPos_X](border.toInt)
+
+      val (prefix: Seq[ReadPos_X], tailSource: Source[ReadPos_X,NotUsed]) = tmp
 
       val init: Map[String,Tuple2[Metadata,R]] = {
         prefix.map(_._2).map( Function.tupled( (meta:Metadata, key: String, v: Array[Byte]) => {
@@ -116,12 +132,18 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
         })).toMap
       }
 
-      Tuple2(init,tailSource)
+      val rest: Source[Tuple3[ReadPos,Metadata,Map[String,R]],NotUsed] = {
+        tailSource.map( Function.tupled(
+          (pos: ReadPos, x: X) => Tuple3(pos,x._1,x._2.toMap)
+        ))
+      }
+
+      Tuple2(init,rest)
     }
   }
 
   override
-  def status( path: String ): Future[Try[AnyStatus]] = {
+  def status( path: String ): Future[StreamsAPI.AnyStatus] = {
     for( node <- anyNode(path);
        res <- node.status ) yield {
       res
@@ -129,16 +151,20 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
   }
 
   override
-  def watch( path: String ): Future[Try[Tuple2[Set[String],Source[String,_]]]] = {
-    for( node <- branchNode(path) ) yield {
-      node.watch
+  def watch( path: String ): Future[Tuple2[Set[String],Source[String,NotUsed]]] = {
+    for( node <- branchNode(path);
+         res: Tuple2[Set[String],Source[String,NotUsed]] <- node.watch
+    ) yield {
+      res
     }
   }
 
   override
-  def seal( path: String, uid: UID ): Future[Try[Boolean]] = {
-    for( node <- anyNode(path) ) yield {
-      node.seal(uid)
+  def seal( path: String, uid: UID ): Future[Boolean] = {
+    for( node <- anyNode(path);
+         res <- node.seal(uid)
+    ) yield {
+      res
     }
   }
 
@@ -159,7 +185,7 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
   }
 
   private
-  def logNode[T <: AnyLogNode[_]](path: String): Future[T] = {
+  def logNode[T <: AnyLogNode[_]](path: String)(implicit ct: ClassTag[T]): Future[T] = {
     root.findLog[T](parseLogPath(path))
   }
 }

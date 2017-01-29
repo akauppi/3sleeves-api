@@ -39,29 +39,29 @@ class BranchNode private (protected val created: Tuple2[UID,Instant], protected 
   // 'gen': If the node does not exist, this is the generator for making it.
   //
   // Returns:
-  //  Success(node) if found or created
-  //  Failure(NotFound) if not found, and not allowed to create ('gen' == None)
-  //  Failure(Mismatch) if the path contains a stage that exists as a log
+  //  'node' if found or created
+  //  fails with 'NotFound' if not found, and not allowed to create ('gen' == None)
+  //  fails with 'Mismatch' if the path contains a stage that exists as a log
   //
   private
-  def findBranch(parts: Seq[String], gen: Option[(String) => BranchNode]): Future[Try[BranchNode]] = {
+  def findBranch(parts: Seq[String], gen: Option[(String) => BranchNode]): Future[BranchNode] = {
 
     if (parts.isEmpty) {
-      Future.successful( Success(this) )
+      Future.successful(this)
     } else {
       (ref ? BranchNodeActor.FindAnyNode(parts, gen)).map{
-        case Success(node: BranchNode) => Success(node)
-        case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected 'BranchNode', got '${x.getClass}'") )
-        case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
+        case Success(node: BranchNode) => node
+        case Success(x) => throw StreamsAPI.Mismatch(s"Expected 'BranchNode', got '${x.getClass}'")
+        case Failure(x) => throw x
       }
     }
   }
 
-  def findBranch(parts: Seq[String], gen: (String) => BranchNode): Future[Try[BranchNode]] = {
+  def findBranch(parts: Seq[String], gen: (String) => BranchNode): Future[BranchNode] = {
     findBranch(parts, Some(gen))
   }
 
-  def findBranch(parts: Seq[String]): Future[Try[BranchNode]] = {
+  def findBranch(parts: Seq[String]): Future[BranchNode] = {
     findBranch(parts, None)
   }
 
@@ -75,28 +75,30 @@ class BranchNode private (protected val created: Tuple2[UID,Instant], protected 
   //  Failure(Mismatch) if the path contains a stage that exists as a log, or if the final stage is not of expected type
   //
   private
-  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String], gen: Option[(String) => T]): Future[Try[T]] = {
+  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String], gen: Option[(String) => T]): Future[T] = {
     require(parts.nonEmpty)
 
+    // tbd. Try to place 'T' as 'FindAnyNode' param so we can make the type checking within the actor
+
     (ref ? BranchNodeActor.FindAnyNode(parts, gen)).map{
-      case Success(node: T) => Success(node)
-      case Success(x) => Failure( StreamsAPI.Mismatch(s"Expected '${typeOf[T]}', got '${x.getClass}'") )
-      case Failure(x) => Failure(x)   // note: needed like this - changes the 'Try' parameter
+      case Success(node: T) => node
+      case Success(x) => throw StreamsAPI.Mismatch(s"Expected '${typeOf[T]}', got '${x.getClass}'")
+      case Failure(x) => throw x
     }
   }
 
-  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String], gen: (String) => T): Future[Try[T]] = {
+  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String], gen: (String) => T): Future[T] = {
     findLog(parts, Some(gen))
   }
 
-  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String]): Future[Try[T]] = {
+  def findLog[T <: AnyLogNode[_] : ClassTag : TypeTag](parts: Seq[String]): Future[T] = {
     findLog(parts, None)
   }
 
-  // tbd. Is there a way in Akka Streams that we can just return a 'Source' right away?
-  //
-  def watch: Future[Source[String,NotUsed]] = {
-    (ref ? Watch).map( _.asInstanceOf[Source[String,NotUsed]] )
+  def watch: Future[Tuple2[Set[String],Source[String,NotUsed]]] = {
+    (ref ? Watch).map{
+      case WatchResp(existing, upcoming) => Tuple2(existing,upcoming)
+    }
   }
 }
 
@@ -184,7 +186,7 @@ object BranchNode {
         val rg: RunnableGraph[Source[String,NotUsed]] = jointSource.toMat(BroadcastHub.sink(bufferSize = 256))(Keep.right)
 
         val tmp: Source[String,NotUsed] = rg.run()
-        sender ! tmp
+        sender ! WatchResp(children.keys.toSet,tmp)
 
     } orElse super.receive
 
@@ -240,8 +242,14 @@ object BranchNode {
     // Messages
     //
     case class FindAnyNode(names: Seq[String], gen: Option[Function1[String,AnyNode]])    // -> Try[AnyNode]
-    case object Watch             // Source[String,NotUsed]
+    case object Watch             // WatchResp
     //case object Status          // -> BranchStatus
     //case class Seal(uid: UID)   // -> Try[Boolean]
+
+    // Responses
+    //
+    // Note: Using these instead of basic types makes it easier to avoid type inconsistencies over the actor use.
+    //
+    case class WatchResp( existing: Set[String], upcoming: Source[String,NotUsed] )
   }
 }

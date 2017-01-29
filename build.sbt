@@ -21,10 +21,10 @@ scalacOptions in ThisBuild ++= Seq(
 //--- Dependencies ---
 
 val akkaVersion = "2.4.16"
-//val akkaActor = "com.typesafe.akka" %% "akka-actor" % akkaVersion
+val akkaActor = "com.typesafe.akka" %% "akka-actor" % akkaVersion
 val akkaStream = "com.typesafe.akka" %% "akka-stream" % akkaVersion
 
-val akkaHttpVersion = "10.0.0"
+//val akkaHttpVersion = "10.0.3"
 //val akkaHttp = "com.typesafe.akka" %% "akka-http" % akkaHttpVersion
 //val akkaHttpTestkit = "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpVersion % Test
 
@@ -47,6 +47,7 @@ lazy val `three-sleeves` = project.in(file("."))
 lazy val api = project
   .settings(
     libraryDependencies ++= Seq(
+      akkaActor,
       akkaStream,
       config,
       //

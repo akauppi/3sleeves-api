@@ -2,6 +2,28 @@
 
 - `README` needs some pictures to make the page lighter to read
 
+Make the below into a table in `README`:
+
+```
+3Sleeves websocket client:
+   Akka Streams (JVM) interface   | Akka Streams Config (JVM) interface
+   -------------- (network hop)
+3Sleeves websocket server:
+   websocket Stream APIs (optional)  | websocket Config API (optional)
+Config API:
+                                   Akka Streams Config (JVM) interface
+Streams API:
+   Akka Streams (JVM) interfaces
+impl-*:
+   back-end implementations (implementing an interface)
+   -------------- (network hop)
+   back-end system
+```
+
+Testing can happen both on the Akka Streams (for implementations) as well as on the Websockets level, and further in the Akka Streams client level. 
+
+Applications can choose any of these levels for their operation.
+
 - mention in `README` what we expect of the implementations:
 
 ||persistent|resilient|replicated| 
@@ -33,15 +55,10 @@ Data content is opaque to us, but e.g. Three Sleeves Configuration API will use 
 
 Note: The main focus of Asko (the original author) is to work on the interface. If you are more interested in the implementation, please say so and take lead on those.
 
-## Naming
-
-- call `PathNode` `BranchNode` 
-
 ## Design
 
-- make each log be *either* keyed, or keyless. This way, e.g. configuration API can require a keyed stream.
-  - Only non-keyed streams support size and time retention
- 
+- Mark somewhere (Websocket project?) about user access
+  - That we want to provide access control, and do it in a uniform manner
 
 ## Dependencies
 
@@ -53,10 +70,16 @@ Note: The main focus of Asko (the original author) is to work on the interface. 
 - could emulate something like symlinks. If we do the directory layer essentially as configuration, it would be merely a thing in there.
 
 
-## Adapters
+## Implementations
 
-- Could do an adapter just for [etcd](https://coreos.com/etcd/).
+- [etcd v3](https://coreos.com/etcd/) by CoreOS
+  - maybe just the Config API
 
+- [Cherami](https://eng.uber.com/cherami/) by Uber
+
+- [DistributedLog](http://distributedlog.incubator.apache.org/) by Twitter
+
+- [Kafka](https://kafka.apache.org/) by Confluent (originally from LinkedIn)
 
 ## Open issues
 

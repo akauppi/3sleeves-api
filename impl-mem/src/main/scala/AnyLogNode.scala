@@ -45,8 +45,8 @@ abstract class AnyLogNode[K] extends AnyNode {
     } )
   }
 
-  def readNextOffsetAndSource: Future[Try[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]]] = {
-    (ref ? ReadNextOffsetAndSource).map( _.asInstanceOf[Try[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]]] )
+  def readNextOffsetAndSource: Future[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]] = {
+    (ref ? ReadNextOffsetAndSource).map( _.asInstanceOf[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]] )
   }
 }
 
