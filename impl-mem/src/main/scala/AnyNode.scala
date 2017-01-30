@@ -2,14 +2,15 @@ package impl.calot
 
 import java.time.Instant
 
-import akka.actor.{Actor, ActorRef}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import impl.calot.AnyNode.AnyNodeActor
-import threeSleeves.StreamsAPI.UID
+import threeSleeves.StreamsAPI.{UID}
 
 import scala.concurrent.{ExecutionContext, Future}
 import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
+import impl.calot.AnyNode.AnyNodeActor.Init
 import threeSleeves.StreamsAPI
 
 import scala.concurrent.duration._
@@ -23,10 +24,17 @@ import scala.concurrent.duration._
 * Note: Each typed class derives from 'AnyNode' and their actors derive from 'AnyNodeActor'. It may be slightly
 *     confusing at first, but works and lets us model the different levels of commonalities.
 */
-abstract class AnyNode {
+abstract class AnyNode (implicit as: ActorSystem) {
   val created: Tuple2[UID,Instant]    // used by 'BranchNodeActor' (needs to be public)
-  protected val ref: ActorRef
+
   protected type Status <: StreamsAPI.AnyStatus
+  protected type NodeActor <: AnyNodeActor
+
+  protected lazy val ref: ActorRef = {
+    val tmp = as.actorOf( Props(classOf[NodeActor]) )   // tbd. does the 'name' parameter default to the name of the actor class?
+    tmp ! Init(created)
+    tmp
+  }
 
   implicit val askTimeout: Timeout = 1 second
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -57,13 +65,19 @@ object AnyNode {
     //import scala.concurrent.ExecutionContext.Implicits.global
 
     protected
+    var created: Tuple2[UID,Instant] = null   // set instantly after creation of the actor
+
+    protected
     var `sealed`: Option[Tuple2[UID,Instant]] = None
 
     protected
     def isSealed = `sealed`.nonEmpty
 
     protected
-    def status: AnyNode.Status
+    type Status <: StreamsAPI.AnyStatus
+
+    protected
+    def status: Status
 
     protected
     def onSeal(): Unit
@@ -72,6 +86,10 @@ object AnyNode {
     //
     protected
     def receive: Receive = {
+
+      case AnyNodeActor.Init(created: Tuple2[UID,Instant]) =>
+        assert(this.created == null)
+        this.created = created
 
       case AnyNodeActor.Status =>
         sender ! this.status
@@ -90,8 +108,10 @@ object AnyNode {
   }
 
   object AnyNodeActor {
-    // Messages common to Log and Path nodes
+    // Messages
     //
+    /*private*/ case class Init(created: Tuple2[UID,Instant])
+
     case object Status            // -> <: AnyNode.Status
     case class Seal(uid: UID)     // -> Boolean
   }

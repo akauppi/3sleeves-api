@@ -23,13 +23,18 @@ import scala.reflect.runtime.universe.{TypeTag, typeOf}
 /*
 * Node for a certain path (akin to directory).
 */
-class BranchNode private (protected val created: Tuple2[UID,Instant], protected val ref: ActorRef) extends AnyNode {
+class BranchNode private (protected val created: Tuple2[UID,Instant], initial: Option[Tuple2[String,AnyNode]] /*, protected val ref: ActorRef*/) extends AnyNode {
   import BranchNode._
   import BranchNodeActor._
   import scala.concurrent.ExecutionContext.Implicits.global
 
   override
   type Status = StreamsAPI.BranchStatus
+
+  override
+  type NodeActor = BranchNodeActor
+
+  ref ! Init(initial)
 
   private
   implicit val askTimeout: Timeout = 1 seconds   // tbd. from config or some global for all ask patterns
@@ -107,15 +112,17 @@ object BranchNode {
   // Provides a new path root
   //
   def root(implicit as: ActorSystem): BranchNode = {
-    BranchNode(UID.Root, Instant.now(), "/")
+    new BranchNode( Tuple2(UID.Root, Instant.now()), None )
   }
 
+  /*** disabled
   // Note: The 'name' parameter is simply for tracking actors
   //
   //private
   def apply(creator: UID, createdAt: Instant, name: String, initial: Map[String,AnyNode] = Map.empty)(implicit as: ActorSystem): BranchNode = {
     new BranchNode( Tuple2(creator,createdAt), as.actorOf( Props(classOf[BranchNodeActor], initial), name = name) )
   }
+  ***/
 
   //--- Actor side ---
   //
@@ -127,11 +134,11 @@ object BranchNode {
   * - keeps a list of the children
   */
   private
-  class BranchNodeActor private ( created: Tuple2[UID,Instant], initial: Map[String,AnyNode] ) extends Actor with AnyNodeActor {
+  class BranchNodeActor private /*( created: Tuple2[UID,Instant], initial: Map[String,AnyNode] )*/ extends AnyNodeActor { self: Actor =>
     import BranchNodeActor._
 
     private
-    var children: Map[String,AnyNode] = initial
+    var children: Map[String,AnyNode] = null    // set on 'Init'
 
     // Underlying source for new entries
     //
@@ -146,6 +153,10 @@ object BranchNode {
 
     override
     def receive: Receive = PartialFunction[Any,Unit] {
+      case Init(initial: Option[Tuple2[String,AnyNode]]) =>
+        assert(this.children == null)
+        this.children = initial.map( t => Map(t) ).getOrElse( Map.empty )
+
       // Find a subbranch, or log node, or create one
       //
       case FindAnyNode(names,gen) =>
@@ -233,7 +244,7 @@ object BranchNode {
       val (first: AnyNode,firstName) = tmp.foldRight( Tuple2(seed,seedName) ){ (aName: String, b: Tuple2[AnyNode,String]) => {
         val (bNode: AnyNode, bName: String) = b
 
-        Tuple2( BranchNode(creator, createdAt, aName, Map(bName -> bNode)), aName )
+        Tuple2( new BranchNode( Tuple2(creator, createdAt) /*, aName*/, Some(bName -> bNode)), aName )
       }}
 
       firstName -> first
@@ -241,7 +252,9 @@ object BranchNode {
 
     // Messages
     //
-    case class FindAnyNode(names: Seq[String], gen: Option[Function1[String,AnyNode]])    // -> Try[AnyNode]
+    /*private*/ case class Init(initial: Option[Tuple2[String,AnyNode]])
+
+    case class FindAnyNode(names: Seq[String], gen: Option[Function1[String,AnyNode]])    // -> AnyNode
     case object Watch             // WatchResp
     //case object Status          // -> BranchStatus
     //case class Seal(uid: UID)   // -> Try[Boolean]

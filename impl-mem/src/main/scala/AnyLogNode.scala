@@ -5,7 +5,6 @@ import java.time.Instant
 import akka.NotUsed
 import akka.actor.{Actor, ActorRef}
 
-import scala.util.Try
 import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy, QueueOfferResult}
 import akka.stream.scaladsl.{BroadcastHub, Flow, Keep, MergeHub, RunnableGraph, Sink, Source, SourceQueueWithComplete}
@@ -16,37 +15,37 @@ import scala.util.Failure
 import scala.concurrent.{ExecutionContext, Future}
 
 /*
-* Common features for 'KeylessLogNode' and 'KeyedLogNode'. We store both as a list of events, though in actual
-* implementations they could be completely different, keyed supporting compaction and keyless retention time/space
-* limits. However, for us this offers a way to keep the code neat and tidy, it's really only needed as a reference
-* implementation.
+* Common for 'KeylessLogNode' and 'KeyedLogNode'. We store both as a list of events, though in actual implementations
+* they could be completely different, keyed supporting compaction and keyless retention time/space limits. However,
+* for us this offers a way to keep the code small.
 *
-* For 'KeylessLogNode', 'K' is 'Unit'
-* For 'KeyedLogNode', 'K' is 'String'
+* Note: We also don't really need marshalling, at all, since the data never leaves the JVM.
+*
+* For 'KeylessLogNode', 'T' can be the record type directly.
+* For 'KeyedLogNode', 'T' is 'Set[Tuple2[String,ConfigValue]]' (for atomic multiple value sets)
 */
-abstract class AnyLogNode[K] extends AnyNode {
+abstract class AnyLogNode extends AnyNode {
   import AnyLogNode._
   import AnyLogNodeActor._
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
+  protected type Record
+
   private
-  type T = Tuple2[K,Array[Byte]]
+  type MR = Tuple2[Metadata,Record]
 
-  def writeSink(uid: UID): Future[Sink[T,NotUsed]] = {
+  def writeSink(uid: UID): Future[Sink[Record,NotUsed]] = {
 
-    (ref ? WriteSink).map( _.asInstanceOf[Sink[Tuple2[Metadata,T],_]] ).map( sink => {
-
-      val tmp: Sink[T,NotUsed] = Flow[T]
+    (ref ? WriteSink).map( _.asInstanceOf[Sink[MR,NotUsed]] ).map( sink => {
+      Flow[Record]
         .map(t => Tuple2(Metadata(uid,Instant.now()),t))
         .to(sink)
-
-      tmp
     } )
   }
 
-  def readNextOffsetAndSource: Future[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]] = {
-    (ref ? ReadNextOffsetAndSource).map( _.asInstanceOf[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,Array[Byte]]],NotUsed]]] )
+  def readPrefixAndSource: Future[Tuple2[Seq[MR],Source[MR,NotUsed]]] = {
+    (ref ? ReadPrefixAndSource).map( _.asInstanceOf[Tuple2[Seq[MR],Source[MR,NotUsed]]] )
   }
 }
 
@@ -65,27 +64,27 @@ object AnyLogNode {
   /*
   * Common actor code for 'KeylessLogActor' and 'KeyedLogActor'
   */
-  trait AnyLogNodeActor[K] extends AnyNodeActor { self: Actor =>
+  trait AnyLogNodeActor[T] extends AnyNodeActor { self: Actor =>
     import AnyLogNodeActor._
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    private type S = Tuple3[Metadata,K,Array[Byte]]
+    private type M_T = Tuple2[Metadata,T]
 
     // Keep a collection of historic values, and separate source for informing on new ones.
     //
     protected
-    var data: List[S] = List.empty   // Note: latest value as head; prepending is fast for immutable lists
+    var data: List[T] = List.empty   // latest value as head; prepending is fast
 
     // Underlying sink and source that are spread to others via 'MergeHub' and 'BroadcastHub'
     //
     private
-    val (jointSink: Sink[S,_], jointSource: Source[S,_], fComplete: Function0[Unit]) = {
+    val (jointSink: Sink[T,_], jointSource: Source[T,_], fComplete: Function0[Unit]) = {
 
-      val source: Source[S,SourceQueueWithComplete[S]] = Source.queue[S](10 /*buffer size*/, OverflowStrategy.fail)
-      val queue: SourceQueueWithComplete[S] = source.toMat(Sink.ignore)(Keep.left).run()    // tbd. is 'Sink.ignore' okay?
+      val source: Source[T,SourceQueueWithComplete[T]] = Source.queue[T](10 /*buffer size*/, OverflowStrategy.fail)
+      val queue: SourceQueueWithComplete[T] = source.toMat(Sink.ignore)(Keep.left).run()    // tbd. is 'Sink.ignore' okay?
 
-      val sink: Sink[S,_] = Sink.foreach( x => {
+      val sink: Sink[T,_] = Sink.foreach( x => {
         val fut: Future[QueueOfferResult] = queue.offer(x)      // offer to current subscribers (if any)
 
         fut.onComplete {
@@ -104,29 +103,22 @@ object AnyLogNode {
     }
 
     private
-    val rg: RunnableGraph[Sink[S,_]] = MergeHub.source[S].to(jointSink)   // using default 'perProducerBufferSize' (16)
+    val rg: RunnableGraph[Sink[T,NotUsed]] = MergeHub.source[T].to(jointSink)   // using default 'perProducerBufferSize' (16)
 
     override
     def receive: Receive = PartialFunction[Any, Unit]{
 
       case WriteSink =>
-        val tmp: Sink[S,_] = rg.run()   // local sink
+        val tmp: Sink[T,NotUsed] = rg.run()   // local sink
         sender ! tmp
 
-      case ReadNextOffsetAndSource =>
-        val rg: RunnableGraph[Source[S,_]] =
+      case ReadPrefixAndSource =>
+        val rg: RunnableGraph[Source[T,NotUsed]] =
           jointSource.toMat(BroadcastHub.sink(bufferSize = 256))(Keep.right)
 
-        val liveSource: Source[S,_] = rg.run()
-
-        val tmp: Source[Tuple2[ReadPos,S],_] = Source(data.reverse)     // values stored so far
-          .concat(liveSource)
-          .zipWithIndex
-          .map( Function.tupled( (entry:S, i:Long) => Tuple2(ReadPos(i), entry) ))
-          //.filter( _._1.v >= at.v )
-
-        sender ! Tuple2(data.size, tmp)
-    }.orElse( super.receive )
+        val tmp: Source[T,NotUsed] = rg.run()
+        sender ! Tuple2(data.reverse, tmp)
+    }.orElse( super.receive )   // pass on 'Status' and 'Seal' to 'AnyNodeActor'
 
     // Called by 'AnyNode'
     //
@@ -141,9 +133,9 @@ object AnyLogNode {
 
     // Messages
     //
-    case object WriteSink       // -> Try[Sink[Tuple3[Metadata,K,V]]]
-    case object ReadNextOffsetAndSource      // -> Try[Tuple2[Long,Source[Tuple2[ReadPos,Tuple3[Metadata,K,V]],NotUsed]]]
-    //case object Status          // -> AnyLogNode.Status
+    case object WriteSink         // -> Sink[Tuple2[Metadata,T]]
+    case object ReadPrefixAndSource      // -> Tuple2[Seq[Tuple2[Metadata,T]],Source[Tuple2[Metadata,T],NotUsed]]
+    //case object Status          // -> Status
     //case class Seal(uid: UID)   // -> Boolean
   }
 }

@@ -13,9 +13,6 @@ import scala.concurrent.Future
 trait StreamsAPI {
   import StreamsAPI._
 
-  type Marshaller[R] = R => Array[Byte]
-  type Unmarshaller[R] = Array[Byte] => R
-
   // Create a branch
   //
   // Returns:
@@ -204,6 +201,9 @@ trait StreamsAPI {
 
 object StreamsAPI {
 
+  type Marshaller[R] = R => Array[Byte]
+  type Unmarshaller[R] = Array[Byte] => R
+
   case class UID(s: String)
 
   object UID {
@@ -244,7 +244,8 @@ object StreamsAPI {
 
   case class KeyedLogStatus(
     created: Tuple2[UID,Instant],
-    `sealed`: Option[Tuple2[UID,Instant]]
+    `sealed`: Option[Tuple2[UID,Instant]],
+    compaction: Boolean
   ) extends AnyLogStatus
 
   // Node information
@@ -263,6 +264,8 @@ object StreamsAPI {
   case class Sealed(msg: String) extends RuntimeException(msg)
 
   // ReadPos
+  //
+  // Note: Only used for keyless logs
   //
   case class ReadPos private (v: Long) extends AnyVal
 

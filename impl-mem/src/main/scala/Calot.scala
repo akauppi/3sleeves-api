@@ -90,12 +90,7 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
 
   override
   def readKeyed[R: Unmarshaller](path: String, rewind: Boolean = false): Future[
-    Try[
-      Tuple2[
-        Map[String,Tuple2[Metadata,R]],
-        Source[Tuple3[ReadPos,Metadata,Map[String,R]],NotUsed]
-      ]
-    ]
+    Tuple2[Map[String,Tuple2[Metadata,R]], Source[Tuple3[ReadPos,Metadata,Map[String,R]],NotUsed]]
   ] = {
 
     val unmar = implicitly[Unmarshaller[R]]
@@ -108,16 +103,17 @@ class Calot(implicit as: ActorSystem) extends StreamsAPI {
     // Scala note: cannot mix 'Future' and 'Try' for comprehensions; need to provide them separately.
     //
     for( node: KeyedLogNode <- logNode[KeyedLogNode](path);
-         (nextPos: Long, sourceByteArray: Source[Tuple2[ReadPos,Tuple3[Metadata,String,Array[Byte]]],NotUsed]) <- node.readNextOffsetAndSource
+         (prefix: Seq[Tuple2[Metadata,Map[String,Array[Byte]]]], sourceByteArray: Source[Tuple2[Metadata,Map[String,Array[Byte]]]],NotUsed]) <- node.readPrefixAndSource
     ) yield {
 
-      val source: Source[Tuple3[Metadata,String,Array[Byte]],NotUsed]
+      val border: Long = if (rewind) 0L else nextPos
 
-      val border: Long = at match {
-        case ReadPos.NextAvailable =>
-          nextPos
-        case ReadPos(x) if x >= 0 => // condition in case we try other 'ReadPos' pre-sets, and they didn't get added here
-          x
+      // Note: Leave conversion to 'R' to the end - this way we don't unnecessarily convert entries (within 'init')
+      //    that would get skipped.
+      //
+      val (head: Seq[T3]source: Source[Tuple3[Metadata,String,Array[Byte]],NotUsed] = {
+        val tmp = sourceByteArray.map( _._2 )
+        tmp.prefixAndTail[X](border.toInt)    // we're trusting 0..nextPos values to come, with no skips
       }
 
       // BUG: WHY does this not compile?
